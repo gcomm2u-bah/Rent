@@ -113,9 +113,11 @@ h1{font-family:var(--display);font-size:32px;font-weight:600;letter-spacing:-.02
 .dueRight{display:flex;align-items:center;gap:12px}
 .dueAmt{font-family:var(--display);font-weight:600;font-size:15px;color:var(--expense)}
 .dueBanner{display:flex;align-items:center;gap:9px;background:#FBEDE9;border:1px solid #EDC9C0;color:var(--expense);padding:11px 15px;border-radius:11px;font-size:13.5px;margin-bottom:18px;font-weight:500}
-.dueItem.late{border-color:#EDC9C0;background:#FDF6F4}
-.lateBadge{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;background:var(--expense);color:#fff;padding:2px 7px;border-radius:6px;margin-left:8px}
-.dueName .lateBadge{vertical-align:middle}
+.dueItem.late{border-color:#F0D9C2;background:#FDF8F2}
+.dueItem.overdue{border-color:#EDC9C0;background:#FDF1EE}
+.lateBadge{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;background:#E8833A;color:#fff;padding:2px 7px;border-radius:6px;margin-left:8px}
+.overdueBadge{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;background:var(--expense);color:#fff;padding:2px 7px;border-radius:6px;margin-left:8px}
+.dueName .lateBadge,.dueName .overdueBadge{vertical-align:middle}
 .owedTag{font-size:11px;color:var(--expense);font-weight:600;margin-top:2px}
 .waPreview{background:#FBF9F4;border:1px solid var(--line);border-radius:11px;padding:16px;font-size:13.5px;line-height:1.55;white-space:pre-wrap;color:var(--ink);max-height:280px;overflow-y:auto;font-family:var(--body)}
 .waActions{display:flex;gap:10px;margin-top:14px}
@@ -493,48 +495,75 @@ function pageHead(title,sub,actions){
 }
 
 // ---------- finance derived ----------
-// Rent is due on the 1st. A tenant is "late" once the grace day passes
-// (default: after the 7th) for the current month, OR if any earlier month
-// since move-in is unpaid (those are always overdue).
-function graceDay(){ var g=Number(localStorage.getItem("rumah_grace")); return (g>=1&&g<=28)?g:7; }
+// Rent model: the 1-month advance paid at signing covers the move-in month,
+// and the 1-month deposit covers the final month. So each month's rent is due
+// on the SAME DAY each month, starting one month after move-in.
+//   • due date passes + ≥1 day unpaid  → "late"
+//   • due date passes + ≥1 month unpaid → "overdue" (escalated)
+// We count how many billing periods (from the first due date up to today) are
+// unpaid. The advance covers the move-in month itself, which is period 0.
+
+// Returns the badge HTML for a due record: Overdue (≥1 month) outranks Late (≥1 day).
+function dueBadge(d){
+  if(!d) return '';
+  if(d.overdue) return '<span class="overdueBadge">Overdue</span>';
+  if(d.late) return '<span class="lateBadge">Late</span>';
+  return '';
+}
 
 function dueList(){
-  var now=new Date(), m=now.getMonth(), y=now.getFullYear(), today=now.getDate();
-  var grace=graceDay();
-  // build a set of paid (tenantId|year|month)
+  var now=new Date(); now.setHours(0,0,0,0);
+  // months paid per tenant, keyed by tenantId|year|month (forMonth/forYear of the payment)
   var paid={};
   DB.Payments.forEach(function(p){ paid[p.tenantId+"|"+p.forYear+"|"+p.forMonth]=true; });
 
+  // add N months to a date, clamping the day to the month length
+  function addMonths(d, n){
+    var day=d.getDate();
+    var t=new Date(d.getFullYear(), d.getMonth()+n, 1);
+    var dim=new Date(t.getFullYear(), t.getMonth()+1, 0).getDate();
+    t.setDate(Math.min(day, dim));
+    t.setHours(0,0,0,0);
+    return t;
+  }
+
   return occupiedRooms().map(function(r){
     var t=tenantById(r.tenantId);
-    if(!t) return null;
+    if(!t || !t.moveIn) return null;
+    var move=new Date(t.moveIn); move.setHours(0,0,0,0);
+    if(isNaN(move)) return null;
 
-    // unpaid months from move-in (or start of this year if no move-in) up to current month
-    var start=t.moveIn?new Date(t.moveIn):new Date(y,0,1);
-    var sy=start.getFullYear(), sm=start.getMonth();
-    var overdueMonths=[];
-    var curUnpaid=false;
-    var yy=sy, mm=sm;
-    while(yy<y || (yy===y && mm<=m)){
-      var isPaid=paid[t.id+"|"+yy+"|"+mm];
-      if(!isPaid){
-        if(yy===y && mm===m){ curUnpaid=true; }       // current month
-        else { overdueMonths.push({y:yy,m:mm}); }      // a past month, always overdue
-      }
-      mm++; if(mm>11){mm=0;yy++;}
+    // walk each due date (1, 2, 3… months after move-in) up to today
+    var unpaid=[];      // {y, m, due} for each unpaid period whose due date has arrived
+    var k=1;
+    while(true){
+      var due=addMonths(move, k);
+      if(due>now) break;                 // not due yet — stop
+      var py=due.getFullYear(), pm=due.getMonth();
+      if(!paid[t.id+"|"+py+"|"+pm]){ unpaid.push({y:py, m:pm, due:due}); }
+      k++;
+      if(k>600) break;                   // safety
     }
+    if(!unpaid.length) return null;       // all due rent paid → nothing owed
 
-    var owesCurrent = curUnpaid;
-    var anyUnpaid = owesCurrent || overdueMonths.length>0;
-    if(!anyUnpaid) return null;
+    var monthsOwed=unpaid.length;
+    var amountOwed=monthsOwed*(+r.rent);
+    var earliestDue=unpaid[0].due;
+    var daysLate=Math.floor((now-earliestDue)/86400000);
 
-    // late if: any past month overdue, OR current month past the grace day
-    var late = overdueMonths.length>0 || (owesCurrent && today>grace);
-    var monthsOwed = overdueMonths.length + (owesCurrent?1:0);
-    var amountOwed = monthsOwed * (+r.rent);
+    // overdue if the earliest unpaid period is a full month or more past its due date,
+    // or more than one period is outstanding
+    var oneMonthAfter=addMonths(earliestDue,1);
+    var overdue = (now>=oneMonthAfter) || monthsOwed>1;
+    var late = daysLate>=1;               // any unpaid period past its due date
 
-    return {room:r, tenant:t, late:late, overdueMonths:overdueMonths,
-            owesCurrent:owesCurrent, monthsOwed:monthsOwed, amountOwed:amountOwed};
+    return {room:r, tenant:t,
+            late:late, overdue:overdue,
+            monthsOwed:monthsOwed, amountOwed:amountOwed,
+            daysLate:daysLate,
+            // keep the old field name used elsewhere: list of unpaid {y,m}
+            overdueMonths:unpaid.map(function(u){return {y:u.y,m:u.m};}),
+            owesCurrent:true };
   }).filter(function(x){ return x; });
 }
 function sums(){
@@ -597,13 +626,12 @@ function viewDashboard(){
   var lateCount=due.filter(function(d){return d.late;}).length;
   var dueCard='<div class="card full-col"><div class="cardHead"><span class="cardTitle">Outstanding rent · '+MONTHS[s.m]+'</span>'+
     '<button class="link" onclick="go(\'rent\')">Go to rent ›</button></div>'+
-    (due.length===0?'<div class="empty">✓ Everyone has paid for this month. Nice.</div>':
+    (due.length===0?'<div class="empty">✓ Everyone has paid up. Nice.</div>':
       '<div class="dueGrid">'+due.map(function(d){
-        var badge=d.late?'<span class="lateBadge">Late</span>':'';
         var owed=d.monthsOwed>1?'<div class="owedTag">'+d.monthsOwed+' months · '+RM(d.amountOwed)+' owed</div>':'';
-        return '<div class="dueItem'+(d.late?' late':'')+'"><div>'+
+        return '<div class="dueItem'+(d.overdue?' overdue':(d.late?' late':''))+'"><div>'+
           '<div class="duePropLine"><span class="duePropName">'+esc(d.room.propName)+'</span><span class="dueRoomTag">'+esc(d.room.label)+'</span></div>'+
-          '<div class="dueName">'+esc(d.tenant.name)+badge+'</div>'+owed+'</div>'+
+          '<div class="dueName">'+esc(d.tenant.name)+dueBadge(d)+'</div>'+owed+'</div>'+
         '<div class="dueRight"><span class="dueAmt">'+RM(d.room.rent)+'</span><button class="btn-mini" onclick="openPayment(\''+d.tenant.id+'\')">Record</button></div></div>';
       }).join("")+'</div>')+'</div>';
 
@@ -717,7 +745,7 @@ function viewTenants(){
   var rowsHtml=filt(active).map(function(t){
     var room=roomById(t.roomId);
     var d=dueByTenant[t.id];
-    var lateBadge=(d&&d.late)?'<span class="lateBadge">Late</span>':'';
+    var lateBadge=dueBadge(d);
     var remind=(d&&t.phone)?'<button class="btn-remind" onclick="openRemind(\''+t.id+'\')">Remind</button>':'';
     return '<div class="trow" style="grid-template-columns:'+cols+'">'+
       '<div><button class="tNameBtn" onclick="openTenantDetail(\''+t.id+'\')">'+esc(t.name)+'</button>'+lateBadge+'<div class="tPhone">'+esc(t.phone)+'</div></div>'+
@@ -752,7 +780,9 @@ function openTenantDetail(tenantId){
   var d=dueList().find(function(x){return x.tenant.id===t.id;});
   var status=t.active===false
     ? '<span class="tdStatus past">Moved out '+esc(t.movedOut||"")+'</span>'
-    : (d?(d.late?'<span class="tdStatus late">Late · owes '+RM(d.amountOwed)+'</span>':'<span class="tdStatus due">Owes '+RM(d.amountOwed)+'</span>')
+    : (d?(d.overdue?'<span class="tdStatus late">Overdue · owes '+RM(d.amountOwed)+'</span>'
+          :(d.late?'<span class="tdStatus due">Late · owes '+RM(d.amountOwed)+'</span>'
+            :'<span class="tdStatus due">Owes '+RM(d.amountOwed)+'</span>'))
         :'<span class="tdStatus ok">Paid up</span>');
 
   var rows=pays.map(function(p){
@@ -793,21 +823,21 @@ function openTenantDetail(tenantId){
 function viewRent(){
   var due=dueList(), s=sums();
   var lateOnes=due.filter(function(d){return d.late;});
+  var overdueOnes=due.filter(function(d){return d.overdue;});
   var withPhone=lateOnes.filter(function(d){return d.tenant.phone;});
 
   var dueBanner=due.length?'<div class="dueBanner">⚠ <b>&nbsp;'+due.length+'</b>&nbsp;tenant'+(due.length>1?'s':'')+' owe rent'+
-    (lateOnes.length?' · <b>&nbsp;'+lateOnes.length+'</b>&nbsp;late':'')+
+    (overdueOnes.length?' · <b>&nbsp;'+overdueOnes.length+'</b>&nbsp;overdue':'')+
     '<div style="flex:1"></div>'+
     (withPhone.length?'<button class="btn-mini" style="background:#25D366" onclick="openRemindAll()">Remind '+withPhone.length+' on WhatsApp</button>':'')+
     '</div>':'';
 
   var dueCards=due.length?'<div class="dueGrid">'+due.map(function(d){
-    var badge=d.late?'<span class="lateBadge">Late</span>':'';
     var owed=d.monthsOwed>1?'<div class="owedTag">'+d.monthsOwed+' months · '+RM(d.amountOwed)+' owed</div>':'';
-    var remindBtn=d.tenant.phone?'<button class="btn-ghost-mini" onclick="openRemind(\''+d.tenant.id+'\')">Remind</button>':'';
-    return '<div class="dueItem'+(d.late?' late':'')+'"><div>'+
+    var remindBtn=d.tenant.phone?'<button class="btn-remind" onclick="openRemind(\''+d.tenant.id+'\')">Remind</button>':'';
+    return '<div class="dueItem'+(d.overdue?' overdue':(d.late?' late':''))+'"><div>'+
       '<div class="duePropLine"><span class="duePropName">'+esc(d.room.propName)+'</span><span class="dueRoomTag">'+esc(d.room.label)+'</span></div>'+
-      '<div class="dueName">'+esc(d.tenant.name)+badge+'</div>'+owed+'</div>'+
+      '<div class="dueName">'+esc(d.tenant.name)+dueBadge(d)+'</div>'+owed+'</div>'+
     '<div class="dueRight"><span class="dueAmt">'+RM(d.room.rent)+'</span>'+remindBtn+'<button class="btn-mini" onclick="openPayment(\''+d.tenant.id+'\')">Record</button></div></div>';
   }).join("")+'</div>':'';
 
@@ -848,9 +878,8 @@ function reminderTemplate(){
 function landlordName(){ return localStorage.getItem("rumah_landlord") || "Management"; }
 
 function periodLabel(d){
-  // produce a human label of what's owed: e.g. "Mar 2026" or "Jan–Mar 2026 (3 months)"
-  var list=d.overdueMonths.slice();
-  if(d.owesCurrent){ var n=new Date(); list.push({y:n.getFullYear(),m:n.getMonth()}); }
+  // d.overdueMonths is the full list of unpaid {y,m} periods (already includes all owed)
+  var list=(d.overdueMonths||[]).slice().sort(function(a,b){ return (a.y-b.y)||(a.m-b.m); });
   if(!list.length) return MONTHS[new Date().getMonth()]+" "+new Date().getFullYear();
   if(list.length===1) return MONTHS[list[0].m]+" "+list[0].y;
   var first=list[0], last=list[list.length-1];
@@ -885,7 +914,7 @@ function openRemind(tenantId){
   var msg=buildMessage(d);
   var hasPhone=!!d.tenant.phone;
   modal('<h3 class="modalTitle">WhatsApp reminder</h3>'+
-    '<p class="modalSub">'+esc(d.tenant.name)+' · '+esc(d.tenant.phone||"no phone on file")+(d.late?' · <b style="color:var(--expense)">Late</b>':'')+'</p>'+
+    '<p class="modalSub">'+esc(d.tenant.name)+' · '+esc(d.tenant.phone||"no phone on file")+(d.overdue?' · <b style="color:var(--expense)">Overdue</b>':(d.late?' · <b style="color:#E8833A">Late</b>':''))+'</p>'+
     '<div class="waPreview" id="wa_msg" contenteditable="true">'+esc(msg)+'</div>'+
     '<div class="waActions">'+
       '<button class="btn-ghost" onclick="copyWa(event)">Copy text</button>'+
@@ -910,26 +939,25 @@ function copyWa(ev){
 
 function openRemindAll(){
   var late=dueList().filter(function(d){return d.late && d.tenant.phone;});
-  if(!late.length){ modal('<h3 class="modalTitle">No reminders to send</h3><div class="empty">No late tenants have a phone number on file.</div>'); return; }
+  if(!late.length){ modal('<h3 class="modalTitle">No reminders to send</h3><div class="empty">No tenants with overdue rent have a phone number on file.</div>'); return; }
   var rowsHtml=late.map(function(d){
-    return '<div class="dueItem" style="margin-bottom:8px"><div><div class="dueName">'+esc(d.tenant.name)+'<span class="lateBadge">Late</span></div>'+
+    return '<div class="dueItem" style="margin-bottom:8px"><div><div class="dueName">'+esc(d.tenant.name)+dueBadge(d)+'</div>'+
       '<div class="dueRoom">'+esc(d.room.propName)+' · '+esc(d.room.label)+' · owes '+RM(d.amountOwed)+'</div></div>'+
       '<div class="dueRight">'+
         '<button class="btn-ghost-mini" onclick="openRemind(\''+d.tenant.id+'\')">Preview</button>'+
         '<a class="btn-wa" style="flex:none;padding:8px 14px" href="'+waLink(d.tenant.phone,buildMessage(d))+'" target="_blank" rel="noopener">Send</a>'+
       '</div></div>';
   }).join("");
-  modal('<h3 class="modalTitle">Remind late tenants</h3>'+
-    '<p class="modalSub">'+late.length+' late tenant'+(late.length>1?'s':'')+' with a phone number. Each opens its own WhatsApp chat — tap Send, then come back for the next.</p>'+
+  modal('<h3 class="modalTitle">Remind tenants</h3>'+
+    '<p class="modalSub">'+late.length+' tenant'+(late.length>1?'s':'')+' past due with a phone number. Each opens its own WhatsApp chat — tap Send, then come back for the next.</p>'+
     rowsHtml+
     '<button class="btn-ghost full" onclick="closeModal()">Done</button>');
 }
 
 function openRentSettings(){
   modal('<h3 class="modalTitle">Rent settings</h3>'+
-    '<p class="modalSub">Late flag, WhatsApp message text, and receipt storage.</p>'+
-    '<div class="field" style="margin-bottom:14px"><span class="fieldLbl">Mark rent late after day…of the month</span>'+
-      '<input class="inp" id="set_grace" type="number" min="1" max="28" value="'+graceDay()+'"></div>'+
+    '<p class="modalSub">WhatsApp message text and receipt storage.</p>'+
+    '<div class="whNotice" style="margin-bottom:14px">Rent is due one month after each tenant\'s move-in date, then the same day every month (the move-in advance covers the first month; the deposit covers the last). Unpaid past the due date shows <b>Late</b>; a full month past shows <b>Overdue</b>.</div>'+
     '<div class="field" style="margin-bottom:14px"><span class="fieldLbl">Your name / business (signs the message)</span>'+
       '<input class="inp" id="set_landlord" value="'+esc(landlordName())+'" placeholder="e.g. CasaMawar Management"></div>'+
     '<div class="field" style="margin-bottom:6px"><span class="fieldLbl">Message template</span>'+
@@ -943,7 +971,6 @@ function openRentSettings(){
     '</div>');
 }
 function saveRentSettings(){
-  var g=Number(el("set_grace").value); if(g>=1&&g<=28) localStorage.setItem("rumah_grace",g);
   localStorage.setItem("rumah_landlord", el("set_landlord").value.trim()||"Management");
   localStorage.setItem("rumah_wa_tpl", el("set_tpl").value.trim()||reminderTemplate());
   var dr=el("set_drive"); if(dr) localStorage.setItem("rumah_drive", dr.checked?"on":"off");
@@ -1404,14 +1431,38 @@ function openAgreement(tenantId){
 function openPayment(tenantId){
   var t=tenantById(tenantId); var room=roomById(t.roomId);
   var now=new Date();
-  var monthOpts=MONTHS.map(function(m,i){return '<option value="'+i+'"'+(i===now.getMonth()?' selected':'')+'>'+m+'</option>';}).join("");
+
+  // Default "For month" to this tenant's OLDEST unpaid period (so it's hard to mis-record).
+  // If paid up, default to the next due month after the latest payment / move-in.
+  var target={ m:now.getMonth(), y:now.getFullYear() };
+  var d=dueList().find(function(x){return x.tenant.id===t.id;});
+  if(d && d.overdueMonths && d.overdueMonths.length){
+    var sorted=d.overdueMonths.slice().sort(function(a,b){ return (a.y-b.y)||(a.m-b.m); });
+    target={ m:sorted[0].m, y:sorted[0].y };
+  } else {
+    // paid up: suggest the month after the most recent recorded payment, else move-in month
+    var mine=DB.Payments.filter(function(p){return p.tenantId===t.id;})
+      .sort(function(a,b){ return (b.forYear-a.forYear)||(b.forMonth-a.forMonth); });
+    if(mine.length){
+      var nm=mine[0].forMonth+1, ny=mine[0].forYear; if(nm>11){nm=0;ny++;}
+      target={ m:nm, y:ny };
+    } else if(t.moveIn){
+      var mv=new Date(t.moveIn); target={ m:mv.getMonth(), y:mv.getFullYear() };
+    }
+  }
+
+  var monthOpts=MONTHS.map(function(m,i){return '<option value="'+i+'"'+(i===target.m?' selected':'')+'>'+m+'</option>';}).join("");
+  var hint = (d && d.overdueMonths && d.overdueMonths.length>1)
+    ? '<div class="whNotice" style="margin:0 0 8px">Oldest unpaid month is pre-selected. This tenant owes '+d.monthsOwed+' months — record each month separately.</div>'
+    : '';
   modal('<h3 class="modalTitle">Record rent payment</h3>'+
     '<p class="modalSub">'+esc(t.name)+' · '+esc(room?room.propName+" "+room.label:"")+'</p>'+
+    hint+
     '<div class="formGrid">'+
       fld("Amount (RM)",'<input class="inp" id="pm_amt" type="number" value="'+t.rent+'" autofocus>')+
       fld("Paid on",'<input class="inp" id="pm_date" type="date" value="'+todayISO()+'">')+
       fld("For month",'<select class="inp" id="pm_month">'+monthOpts+'</select>')+
-      fld("For year",'<input class="inp" id="pm_year" type="number" value="'+now.getFullYear()+'">')+
+      fld("For year",'<input class="inp" id="pm_year" type="number" value="'+target.y+'">')+
       fld("Method",'<select class="inp" id="pm_method"><option>Cash</option><option>Bank transfer</option><option>e-Wallet</option><option>Cheque</option></select>')+
     '</div>'+
     '<button class="btn-primary full" onclick="doPayment(\''+tenantId+'\')">Save & issue receipt</button>');
