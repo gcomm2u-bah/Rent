@@ -261,6 +261,15 @@ h1{font-family:var(--display);font-size:32px;font-weight:600;letter-spacing:-.02
 .docBrand{font-family:var(--display);font-size:20px;font-weight:700;letter-spacing:.02em}
 .docNo{font-size:12px;color:var(--ink-soft);margin-top:4px;font-weight:600}
 .docDate{font-size:12px;color:var(--ink-soft)}
+.docTitleWrap{text-align:center;border-bottom:2px solid var(--ink);padding-bottom:18px;margin-bottom:18px}
+.docTitleWrap .docBrand{font-size:23px}
+.docCompany{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:14px}
+.docLogo{max-height:54px;max-width:160px;object-fit:contain}
+.docCompanyText{text-align:left}
+.docCompanyName{font-family:var(--display);font-weight:600;font-size:15px;color:var(--ink)}
+.docCompanyAddr{font-size:11.5px;color:var(--ink-soft);margin-top:2px;max-width:320px;line-height:1.4}
+.docDatedLine{font-size:12px;color:var(--ink-soft);margin-top:14px;font-weight:600}
+.docDateFoot{font-size:12px;color:var(--ink-soft);margin-top:24px;font-style:italic}
 .docPara{font-size:13px;line-height:1.6;color:var(--ink-soft);margin-bottom:18px}
 .docCols{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}
 .docLbl{font-size:10.5px;font-weight:700;color:var(--ink-faint);letter-spacing:.06em;margin-bottom:6px}
@@ -361,6 +370,22 @@ var houseAgreementApi = function(data){ return apiPost({action:"houseAgreement",
 var MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 function RM(n){return "RM "+Number(n||0).toLocaleString("en-MY",{minimumFractionDigits:2,maximumFractionDigits:2});}
 function todayISO(){var d=new Date();return d.toISOString().slice(0,10);}
+// Format an ISO date (yyyy-mm-dd) or Date as "16 June 2026"
+function longDate(iso){
+  if(!iso) return "";
+  var d=(iso instanceof Date)?iso:new Date(iso);
+  if(isNaN(d)) return String(iso);
+  var months=["January","February","March","April","May","June","July","August","September","October","November","December"];
+  return d.getDate()+" "+months[d.getMonth()]+" "+d.getFullYear();
+}
+// Format an ISO date (yyyy-mm-dd) as "16-06-2026"
+function dmyDate(iso){
+  if(!iso) return "";
+  var d=(iso instanceof Date)?iso:new Date(iso);
+  if(isNaN(d)) return String(iso);
+  var dd=("0"+d.getDate()).slice(-2), mm=("0"+(d.getMonth()+1)).slice(-2);
+  return dd+"-"+mm+"-"+d.getFullYear();
+}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
 function el(id){return document.getElementById(id);}
@@ -842,7 +867,7 @@ function viewRent(){
   }).join("")+'</div>':'';
 
   var visible=DB.Payments.filter(function(p){ if(rentFilter==="all")return true; var r=roomById(p.roomId); return r&&r.propId===rentFilter; });
-  var cols="1.1fr 1.1fr 1.2fr .8fr .9fr .9fr auto";
+  var cols="1.1fr 1.1fr 1.2fr .8fr .9fr .9fr 110px";
   var hist=visible.map(function(p){
     var t=tenantById(p.tenantId);
     var r=roomById(p.roomId);
@@ -1133,10 +1158,12 @@ async function saveCompanySettings(){
 // ============================================================
 //  MODALS
 // ============================================================
-function modal(html){
+function modal(html, lockBackdrop){
   var m=document.createElement("div");
   m.className="overlay"; m.id="overlay";
-  m.onclick=function(e){ if(e.target===m) closeModal(); };
+  // by default, clicking the dark backdrop closes the modal;
+  // when lockBackdrop is true, only the X or an explicit button can close it
+  if(!lockBackdrop){ m.onclick=function(e){ if(e.target===m) closeModal(); }; }
   m.innerHTML='<div class="modal"><button class="modalClose" onclick="closeModal()">×</button>'+html+'</div>';
   document.body.appendChild(m);
 }
@@ -1192,14 +1219,19 @@ async function delRoom(roomId){
 function openNewTenant(){
   if(!DB.Properties.length){ modal('<h3 class="modalTitle">New tenant</h3><div class="empty">No properties yet. Add a house first in “Houses & Rooms”.</div>'); return; }
   var vac=vacantRooms();
-  // show ALL properties (so a newly created one always appears), with vacant counts
-  var propOpts=DB.Properties.map(function(p){
+  // only properties that actually have a vacant room can take a new tenant
+  var propsWithVac=DB.Properties.filter(function(p){ return vac.some(function(r){return r.propId===p.id;}); });
+  if(!propsWithVac.length){
+    modal('<h3 class="modalTitle">New tenant</h3><div class="empty">All properties are fully occupied. Free up a room (move a tenant out) or add a room in “Houses &amp; Rooms” first.</div>');
+    return;
+  }
+  var propOpts=propsWithVac.map(function(p){
     var n=vac.filter(function(r){return r.propId===p.id;}).length;
-    var tag=isWholeHouse(p.id) ? (n>0?'whole-house · available':'whole-house · occupied') : (n+' vacant');
+    var tag=isWholeHouse(p.id) ? 'whole-house · available' : (n+' vacant');
     return '<option value="'+p.id+'">'+esc(p.name)+' ('+tag+')</option>';
   }).join("");
-  // default the selection to the first property that has a vacant room, if any
-  var firstWithVac=DB.Properties.find(function(p){ return vac.some(function(r){return r.propId===p.id;}); });
+  // default to the first property with a vacancy
+  var firstWithVac=propsWithVac[0];
   modal('<h3 class="modalTitle">New tenant</h3>'+
     '<p class="modalSub">Pick the property, then the room. An agreement is generated automatically.</p>'+
     '<div class="formGrid">'+
@@ -1208,14 +1240,14 @@ function openNewTenant(){
       fld("IC / Passport",'<input class="inp" id="nt_ic">')+
       fld("Email",'<input class="inp" id="nt_email">')+
       fld("Property",'<select class="inp" id="nt_prop" onchange="ntPropChange()">'+propOpts+'</select>')+
-      '<div id="nt_room_field">'+fld("Room",'<div class="roomPick"><input class="inp" id="nt_room_search" placeholder="Search room…" oninput="ntRoomFilter()" autocomplete="off"><div id="nt_room_list" class="roomList"></div><input type="hidden" id="nt_room"></div>')+'</div>'+
+      '<div id="nt_room_field" style="grid-column:1/-1">'+fld("Room",'<div class="roomPick"><input class="inp" id="nt_room_search" placeholder="Search room…" oninput="ntRoomFilter()" autocomplete="off"><div id="nt_room_list" class="roomList"></div><input type="hidden" id="nt_room"></div>')+'</div>'+
       fld("Move-in date",'<input class="inp" id="nt_movein" type="date" value="'+todayISO()+'">')+
       fld("Monthly rent (RM)",'<input class="inp" id="nt_rent" type="number">')+
       fld("Deposit (RM)",'<input class="inp" id="nt_deposit" type="number">')+
       fld("Agreement (months)",'<input class="inp" id="nt_dur" type="number" value="12">')+
     '</div>'+
     '<div id="nt_house_extra"></div>'+
-    '<button class="btn-primary full" id="nt_save" onclick="doNewTenant()">Create tenant & generate agreement</button>');
+    '<button class="btn-primary full" id="nt_save" onclick="doNewTenant()">Create tenant & generate agreement</button>', true);
   if(firstWithVac){ el("nt_prop").value=firstWithVac.id; }
   ntPropChange();
 }
@@ -1413,17 +1445,49 @@ function openAgreementFor(tenantId){
 function openAgreement(tenantId){
   var t=tenantById(tenantId); var room=roomById(t.roomId);
   var prop=DB.Properties.find(function(p){return DB.Rooms.some(function(r){return r.id===t.roomId&&r.propId===p.id;});});
-  var end=(function(){var d=new Date(t.moveIn); d.setMonth(d.getMonth()+Number(t.duration||12)); return d.toISOString().slice(0,10);})();
+  var end=(function(){var d=new Date(t.moveIn); d.setMonth(d.getMonth()+Number(t.duration||12)); return longDate(d);})();
+  var c=COMPANY||{};
+  var dateStr=longDate(t.createdAt);
+
+  // Company header block: logo + name + address (whatever is filled in Settings)
+  var logo=c.logoUrl?'<img class="docLogo" src="'+esc(c.logoUrl)+'" alt="logo">':'';
+  var compName=c.companyName||c.landlordName||'';
+  var compBlock=(logo||compName||c.landlordAddress)?
+    '<div class="docCompany">'+logo+
+      '<div class="docCompanyText">'+
+        (compName?'<div class="docCompanyName">'+esc(compName)+'</div>':'')+
+        (c.landlordAddress?'<div class="docCompanyAddr">'+esc(c.landlordAddress)+'</div>':'')+
+      '</div>'+
+    '</div>':'';
+
+  // Bank details for payment instructions
+  var bankLine=(c.bankName||c.bankAccount)
+    ? term("Pay rent to", esc((c.bankName||"")+(c.bankAccount?" · "+c.bankAccount:"")))
+    : '';
+
   modal('<div class="docHead"><h3 class="modalTitle">Tenancy agreement</h3><button class="btn-ghost" onclick="window.print()">⬇ Print / Save PDF</button></div>'+
     '<div id="printable" class="doc">'+
-      '<div class="docTop"><div><div class="docBrand">TENANCY AGREEMENT</div><div class="docNo">'+esc(t.agreementNo)+'</div></div><div class="docDate">Dated '+esc(t.createdAt)+'</div></div>'+
+      '<div class="docTitleWrap">'+
+        '<div class="docBrand">TENANCY AGREEMENT</div>'+
+        compBlock+
+        '<div class="docDatedLine">Dated '+esc(dateStr)+' &nbsp;·&nbsp; Ref '+esc(t.agreementNo)+'</div>'+
+      '</div>'+
       '<p class="docPara">This agreement is made between the <b>Landlord</b> and the <b>Tenant</b> named below for the rental of the room described herein, subject to the terms and conditions set out.</p>'+
       '<div class="docCols"><div><div class="docLbl">TENANT</div><div class="docVal">'+esc(t.name)+'</div>'+
         '<div class="docMini">IC/Passport: '+esc(t.ic||"—")+'</div><div class="docMini">Phone: '+esc(t.phone||"—")+'</div><div class="docMini">Email: '+esc(t.email||"—")+'</div></div>'+
         '<div><div class="docLbl">PREMISES</div><div class="docVal">'+esc(prop?prop.name:"")+' — Room '+esc(room?room.label:"")+'</div><div class="docMini">'+esc(prop&&prop.address?prop.address:"Address on file")+'</div></div></div>'+
-      '<div class="docTerms">'+term("Monthly rent",RM(t.rent))+term("Security deposit",RM(t.deposit))+term("Tenancy start",esc(t.moveIn))+term("Tenancy end",end)+term("Duration",t.duration+" months")+term("Rent due","1st of each month")+'</div>'+
-      '<div class="docClause"><b>1. Rent.</b> The Tenant shall pay the monthly rent on or before the due date each month.<br><b>2. Deposit.</b> The deposit is refundable on move-out, less any damages or arrears.<br><b>3. Use.</b> The premises shall be used for residential purposes only.<br><b>4. Termination.</b> Either party may terminate with one month written notice.<br><b>5. Maintenance.</b> The Tenant shall keep the premises clean and report damages promptly.</div>'+
+      '<div class="docTerms">'+term("Monthly rent",RM(t.rent))+term("Security deposit",RM(t.deposit))+term("Tenancy start",longDate(t.moveIn))+term("Tenancy end",end)+term("Duration",t.duration+" months")+term("Rent due","Monthly, one month after move-in")+bankLine+'</div>'+
+      '<div class="docClause">'+
+        '<b>1. Rent.</b> The Tenant shall pay the monthly rent on or before the due date each month'+((c.bankName||c.bankAccount)?(', to '+esc(c.bankName||"")+(c.bankAccount?' account '+esc(c.bankAccount):'')):'')+'.<br>'+
+        '<b>2. Deposit.</b> The security deposit is held by the Landlord and refunded after the Tenant moves out, less any unpaid rent, utilities, or the cost of repairing damage beyond fair wear and tear. By mutual agreement, the deposit is normally applied towards the final month\u2019s rent before the Tenant moves out.<br>'+
+        '<b>3. Use.</b> The premises shall be used for residential purposes only.<br>'+
+        '<b>4. Conduct & harmony.</b> As this is a shared home, the Tenant agrees to be considerate of the other occupants at all times \u2014 keeping noise to a respectful level, especially at night, and behaving courteously so that everyone can enjoy a peaceful and harmonious living environment.<br>'+
+        '<b>5. Cleanliness & shared areas.</b> The shared kitchen, toilets, living room, and hallway are for everyone\u2019s use. The Tenant agrees to keep these areas clean and tidy after each use, to dispose of rubbish properly, and to take turns fairly in caring for the common spaces so they remain pleasant for all.<br>'+
+        '<b>6. Maintenance.</b> The Tenant shall keep the room clean and in good condition and report any damage or repairs needed to the Landlord promptly.<br>'+
+        '<b>7. Termination.</b> Either party may end this agreement by giving one month\u2019s written notice.'+
+      '</div>'+
       '<div class="signRow"><div class="signBox"><div class="signLine"></div>Landlord</div><div class="signBox"><div class="signLine"></div>Tenant — '+esc(t.name)+'</div></div>'+
+      '<div class="docDateFoot">This agreement is dated '+esc(dateStr)+'.</div>'+
     '</div><button class="btn-ghost full" onclick="closeModal()">Close</button>');
 }
 
@@ -1521,7 +1585,7 @@ function openReceipt(paymentId){
       '<div class="rcTop"><div><div class="rcBrand">RENT RECEIPT</div><div class="docNo">'+esc(p.receiptNo)+'</div></div><div class="rcPaid">PAID</div></div>'+
       '<div class="rcAmount">'+RM(p.amount)+'</div>'+
       '<div class="rcGrid">'+term("Received from",esc(t?t.name:p.tenantName))+term("For","Rent — "+MONTHS[p.forMonth]+" "+p.forYear)+
-        term("Room",room?esc(room.propName)+" · "+esc(room.label):"—")+term("Payment date",esc(p.date))+term("Method",esc(p.method))+'</div>'+
+        term("Room",room?esc(room.propName)+" · "+esc(room.label):"—")+term("Payment date",esc(dmyDate(p.date)))+term("Method",esc(p.method))+'</div>'+
       '<div class="rcFoot">Thank you. This receipt confirms the payment above was received in full.</div>'+
     '</div>'+
     '<div id="driveSlot" style="text-align:center;margin-top:12px;font-size:12.5px">'+driveSlot+'</div>'+
