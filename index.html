@@ -270,6 +270,13 @@ h1{font-family:var(--display);font-size:32px;font-weight:600;letter-spacing:-.02
 .docCompanyAddr{font-size:11.5px;color:var(--ink-soft);margin-top:2px;max-width:320px;line-height:1.4}
 .docDatedLine{font-size:12px;color:var(--ink-soft);margin-top:14px;font-weight:600}
 .docDateFoot{font-size:12px;color:var(--ink-soft);margin-top:24px;font-style:italic}
+.plTable{width:100%;border-collapse:collapse;margin-top:6px}
+.plTable td{padding:9px 4px;font-size:13.5px;border-bottom:1px solid var(--line)}
+.plTable .pl-l{color:var(--ink)}
+.plTable .pl-r{text-align:right;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.plTable .pl-sec td{background:#FBF9F4;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-soft);border-bottom:1px solid var(--line)}
+.plTable .pl-gap td{border:none;height:10px}
+.plDecl{font-size:11.5px;color:var(--ink-soft);line-height:1.6;margin-top:20px;padding:12px 14px;background:#FBF9F4;border:1px solid var(--line);border-radius:8px}
 .docPara{font-size:13px;line-height:1.6;color:var(--ink-soft);margin-bottom:18px}
 .docCols{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}
 .docLbl{font-size:10.5px;font-weight:700;color:var(--ink-faint);letter-spacing:.06em;margin-bottom:6px}
@@ -1065,6 +1072,7 @@ function viewReports(){
   return '<div class="page">'+
     pageHead("Reports","Yearly and monthly income vs expenses",
       '<select class="select" style="width:auto" onchange="reportYear=Number(this.value);render()">'+yearOpts+'</select>'+
+      '<button class="btn-ghost" onclick="openPLStatement()">📄 Yearly P&L statement</button>'+
       '<button class="btn-ghost" onclick="exportCSV()">⬇ Export CSV</button>')+
     '<div class="ledgerStrip">'+
       ledgerCell("Total income "+reportYear,RM(totalInc),"","var(--income)",true)+'<div class="ledgerDiv"></div>'+
@@ -1092,6 +1100,84 @@ function exportCSV(){
   var a=document.createElement("a");
   a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
   a.download="report-"+reportYear+".csv"; a.click();
+}
+
+// Yearly Profit & Loss statement, formatted for LHDN / MyTax declaration
+function openPLStatement(){
+  var c=COMPANY||{};
+  var y=reportYear;
+
+  // Gross rental income by property
+  var incomeRows=[], totalIncome=0;
+  DB.Properties.forEach(function(p){
+    var rids={}; DB.Rooms.filter(function(r){return r.propId===p.id;}).forEach(function(r){rids[r.id]=1;});
+    var inc=DB.Payments.filter(function(pm){return pm.forYear===y && rids[pm.roomId];}).reduce(function(s,pm){return s+(+pm.amount);},0);
+    if(inc>0){ incomeRows.push({name:p.name, amt:inc}); totalIncome+=inc; }
+  });
+  // payments whose room no longer maps to a property (safety)
+  var mappedRoomIds={}; DB.Rooms.forEach(function(r){mappedRoomIds[r.id]=1;});
+  var orphanInc=DB.Payments.filter(function(pm){return pm.forYear===y && !mappedRoomIds[pm.roomId];}).reduce(function(s,pm){return s+(+pm.amount);},0);
+  if(orphanInc>0){ incomeRows.push({name:"Other / unassigned", amt:orphanInc}); totalIncome+=orphanInc; }
+
+  // Deductible expenses grouped by category
+  var catMap={}, totalExp=0;
+  DB.Expenses.filter(function(e){return new Date(e.date).getFullYear()===y;}).forEach(function(e){
+    var k=e.category||"Other";
+    catMap[k]=(catMap[k]||0)+(+e.amount); totalExp+=(+e.amount);
+  });
+  var expRows=Object.keys(catMap).sort().map(function(k){ return {name:k, amt:catMap[k]}; });
+
+  var net=totalIncome-totalExp;
+  var dateStr=longDate(todayISO());
+
+  var logo=c.logoUrl?'<img class="docLogo" src="'+esc(c.logoUrl)+'" alt="logo">':'';
+  var compName=c.companyName||c.landlordName||'';
+  var compBlock=(logo||compName||c.landlordAddress)?
+    '<div class="docCompany">'+logo+'<div class="docCompanyText">'+
+      (compName?'<div class="docCompanyName">'+esc(compName)+'</div>':'')+
+      (c.landlordAddress?'<div class="docCompanyAddr">'+esc(c.landlordAddress)+'</div>':'')+
+      (c.landlordIc?'<div class="docCompanyAddr">No. K/P: '+esc(c.landlordIc)+'</div>':'')+
+    '</div></div>':'';
+
+  function plRow(label,amt,opts){
+    opts=opts||{};
+    return '<tr'+(opts.bold?' style="font-weight:700"':'')+'>'+
+      '<td class="pl-l"'+(opts.indent?' style="padding-left:24px"':'')+'>'+esc(label)+'</td>'+
+      '<td class="pl-r"'+(opts.color?' style="color:'+opts.color+'"':'')+'>'+RM(amt)+'</td></tr>';
+  }
+
+  var incomeHtml=incomeRows.length
+    ? incomeRows.map(function(r){return plRow(r.name,r.amt,{indent:true});}).join("")
+    : '<tr><td class="pl-l" style="padding-left:24px;color:#A39C90">No rental income recorded</td><td class="pl-r">'+RM(0)+'</td></tr>';
+  var expHtml=expRows.length
+    ? expRows.map(function(r){return plRow(r.name,r.amt,{indent:true});}).join("")
+    : '<tr><td class="pl-l" style="padding-left:24px;color:#A39C90">No expenses recorded</td><td class="pl-r">'+RM(0)+'</td></tr>';
+
+  modal('<div class="docHead"><h3 class="modalTitle">Yearly P&L statement '+y+'</h3>'+
+      '<button class="btn-ghost" onclick="window.print()">⬇ Print / Save PDF</button></div>'+
+    '<div id="printable" class="doc">'+
+      '<div class="docTitleWrap">'+
+        '<div class="docBrand">PENYATA UNTUNG RUGI / PROFIT &amp; LOSS STATEMENT</div>'+
+        compBlock+
+        '<div class="docDatedLine">Tahun Taksiran / Year of Assessment: '+y+'</div>'+
+      '</div>'+
+      '<table class="plTable">'+
+        '<tr class="pl-sec"><td class="pl-l">Pendapatan Sewa Kasar / Gross Rental Income</td><td></td></tr>'+
+        incomeHtml+
+        plRow("Jumlah Pendapatan Kasar / Total Gross Income", totalIncome, {bold:true})+
+        '<tr class="pl-gap"><td colspan="2"></td></tr>'+
+        '<tr class="pl-sec"><td class="pl-l">Tolak: Perbelanjaan / Less: Allowable Expenses</td><td></td></tr>'+
+        expHtml+
+        plRow("Jumlah Perbelanjaan / Total Expenses", totalExp, {bold:true})+
+        '<tr class="pl-gap"><td colspan="2"></td></tr>'+
+        plRow((net>=0?"Pendapatan Bersih Bercukai / Net Taxable Income":"Kerugian Bersih / Net Loss"), Math.abs(net), {bold:true, color:(net>=0?"#1F6B4F":"#B14A3A")})+
+      '</table>'+
+      '<div class="plDecl">I declare that the above statement of rental income and expenses for the year '+y+' is true and correct to the best of my knowledge, for the purpose of income tax declaration to Lembaga Hasil Dalam Negeri Malaysia (LHDNM).</div>'+
+      '<div class="signRow" style="margin-top:30px"><div class="signBox"><div class="signLine"></div>Tandatangan / Signature'+(compName?' — '+esc(compName):'')+'</div>'+
+        '<div class="signBox"><div class="signLine"></div>Tarikh / Date</div></div>'+
+      '<div class="docDateFoot">Statement generated on '+esc(dateStr)+'. Figures are based on payments and expenses recorded in this system.</div>'+
+    '</div>'+
+    '<button class="btn-ghost full" onclick="closeModal()">Close</button>');
 }
 
 // ---------- Settings (company / landlord) ----------
