@@ -139,6 +139,17 @@ h1{font-family:var(--display);font-size:32px;font-weight:600;letter-spacing:-.02
 .invRow .invNo{font-size:12px;color:var(--ink-faint);width:18px;text-align:center;flex-shrink:0}
 .haStatus{display:flex;align-items:center;gap:10px;padding:16px;background:#FBF9F4;border:1px solid var(--line);border-radius:11px;margin-bottom:14px;font-size:13px;color:var(--ink-soft)}
 .connUrl{font-family:monospace;font-size:12px;color:var(--ink-soft);background:#FBF9F4;border:1px solid var(--line);border-radius:8px;padding:10px 12px;word-break:break-all}
+.duePropLine{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+.duePropName{font-family:var(--display);font-weight:600;font-size:13px;color:var(--accent)}
+.dueRoomTag{font-size:10.5px;font-weight:700;color:var(--ink-soft);background:var(--line);padding:1px 7px;border-radius:5px}
+.roomPick{position:relative}
+.roomList{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;max-height:140px;overflow-y:auto;padding:2px}
+.roomOpt{display:flex;flex-direction:column;align-items:flex-start;gap:1px;border:1px solid var(--line);background:var(--surface);border-radius:9px;padding:7px 11px;cursor:pointer;transition:.12s;min-width:74px}
+.roomOpt:hover{border-color:var(--accent)}
+.roomOpt.sel{border-color:var(--accent);background:var(--accent-soft)}
+.roomOptLbl{font-family:var(--display);font-weight:600;font-size:13px;color:var(--ink)}
+.roomOptRent{font-size:10.5px;color:var(--ink-soft)}
+.roomNone{font-size:12.5px;color:var(--ink-faint);padding:8px 2px}
 .driveMsg{color:var(--ink-faint)}
 .driveMsg.err{color:var(--expense)}
 .toggleRow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-top:1px solid var(--line);margin-top:6px}
@@ -332,7 +343,7 @@ function el(id){return document.getElementById(id);}
 var DB={Properties:[],Rooms:[],Tenants:[],Payments:[],Expenses:[]};
 var COMPANY={};
 var TAB="dashboard";
-var openProp=null, editRoomId=null, tenantQuery="", rentFilter="all", reportYear=new Date().getFullYear();
+var openProp=null, propInit=false, propQuery="", editRoomId=null, tenantQuery="", rentFilter="all", reportYear=new Date().getFullYear();
 var syncState="ok";
 
 function setSync(s){ syncState=s; var d=el("syncDot"); if(d){ d.className="syncDot "+(s==="ok"?"":s); d.querySelector("span").textContent = s==="saving"?"Saving…":s==="err"?"Sync error":"All saved"; } }
@@ -555,7 +566,9 @@ function viewDashboard(){
       '<div class="dueGrid">'+due.map(function(d){
         var badge=d.late?'<span class="lateBadge">Late</span>':'';
         var owed=d.monthsOwed>1?'<div class="owedTag">'+d.monthsOwed+' months · '+RM(d.amountOwed)+' owed</div>':'';
-        return '<div class="dueItem'+(d.late?' late':'')+'"><div><div class="dueName">'+esc(d.tenant.name)+badge+'</div><div class="dueRoom">'+esc(d.room.propName)+' · '+esc(d.room.label)+'</div>'+owed+'</div>'+
+        return '<div class="dueItem'+(d.late?' late':'')+'"><div>'+
+          '<div class="duePropLine"><span class="duePropName">'+esc(d.room.propName)+'</span><span class="dueRoomTag">'+esc(d.room.label)+'</span></div>'+
+          '<div class="dueName">'+esc(d.tenant.name)+badge+'</div>'+owed+'</div>'+
         '<div class="dueRight"><span class="dueAmt">'+RM(d.room.rent)+'</span><button class="btn-mini" onclick="openPayment(\''+d.tenant.id+'\')">Record</button></div></div>';
       }).join("")+'</div>')+'</div>';
 
@@ -580,8 +593,11 @@ function ring(pct){
 
 // ---------- Properties ----------
 function viewProperties(){
-  if(openProp===null && DB.Properties[0]) openProp=DB.Properties[0].id;
-  var list=DB.Properties.map(function(p){
+  // open the first property only on the very first visit, not on every render
+  if(!propInit){ if(DB.Properties[0]) openProp=DB.Properties[0].id; propInit=true; }
+  var q=propQuery.toLowerCase();
+  var shown=DB.Properties.filter(function(p){ return !q || p.name.toLowerCase().indexOf(q)>=0; });
+  var list=shown.map(function(p){
     var prooms=DB.Rooms.filter(function(r){return r.propId===p.id;});
     var occ=prooms.filter(function(r){return r.tenantId;}).length;
     var rev=prooms.filter(function(r){return r.tenantId;}).reduce(function(s,r){return s+(+r.rent);},0);
@@ -619,11 +635,17 @@ function viewProperties(){
         '<button class="addRoomCard" onclick="openAddRoom(\''+p.id+'\')"><span style="font-size:22px">+</span><span>Add room</span></button>'+
         '</div></div>':'')+'</div>';
   }).join("");
+  var searchBar=DB.Properties.length>3?'<div class="searchBar" style="margin-bottom:16px">🔍<input placeholder="Search property by name…" value="'+esc(propQuery)+'" oninput="propQuery=this.value;render();propFocus()" id="pq"></div>':'';
+  var emptyMsg=shown.length?'':'<div class="empty">No property matches “'+esc(propQuery)+'”.</div>';
+  var collapseBtn=DB.Properties.length>1?'<button class="btn-ghost" onclick="collapseAllProps()">Collapse all</button>':'';
   return '<div class="page">'+
     pageHead("Houses & Rooms","Manage your buildings, rooms and rent amounts",
-      '<button class="btn-primary" onclick="openAddProperty()">+ Add house</button>')+
-    '<div class="propList">'+list+'</div></div>';
+      collapseBtn+'<button class="btn-primary" onclick="openAddProperty()">+ Add house</button>')+
+    searchBar+
+    '<div class="propList">'+list+emptyMsg+'</div></div>';
 }
+function propFocus(){ var i=el("pq"); if(i){ i.focus(); i.setSelectionRange(i.value.length,i.value.length); } }
+function collapseAllProps(){ openProp=null; render(); }
 function toggleProp(id){ openProp = openProp===id?null:id; editRoomId=null; render(); }
 async function toggleWholeHouse(propId,on){
   var p=propById(propId); if(!p) return;
@@ -701,18 +723,23 @@ function viewRent(){
     var badge=d.late?'<span class="lateBadge">Late</span>':'';
     var owed=d.monthsOwed>1?'<div class="owedTag">'+d.monthsOwed+' months · '+RM(d.amountOwed)+' owed</div>':'';
     var remindBtn=d.tenant.phone?'<button class="btn-ghost-mini" onclick="openRemind(\''+d.tenant.id+'\')">Remind</button>':'';
-    return '<div class="dueItem'+(d.late?' late':'')+'"><div><div class="dueName">'+esc(d.tenant.name)+badge+'</div><div class="dueRoom">'+esc(d.room.propName)+' · '+esc(d.room.label)+'</div>'+owed+'</div>'+
+    return '<div class="dueItem'+(d.late?' late':'')+'"><div>'+
+      '<div class="duePropLine"><span class="duePropName">'+esc(d.room.propName)+'</span><span class="dueRoomTag">'+esc(d.room.label)+'</span></div>'+
+      '<div class="dueName">'+esc(d.tenant.name)+badge+'</div>'+owed+'</div>'+
     '<div class="dueRight"><span class="dueAmt">'+RM(d.room.rent)+'</span>'+remindBtn+'<button class="btn-mini" onclick="openPayment(\''+d.tenant.id+'\')">Record</button></div></div>';
   }).join("")+'</div>':'';
 
   var visible=DB.Payments.filter(function(p){ if(rentFilter==="all")return true; var r=roomById(p.roomId); return r&&r.propId===rentFilter; });
-  var cols="1.2fr 1.2fr .8fr 1fr 1fr auto";
+  var cols="1.1fr 1.1fr 1.2fr .8fr .9fr .9fr auto";
   var hist=visible.map(function(p){
     var t=tenantById(p.tenantId);
+    var r=roomById(p.roomId);
+    var place=r?esc(r.propName)+' · '+esc(r.label):'—';
     var pdf=p.receiptUrl?'<a class="icon-btn" href="'+esc(p.receiptUrl)+'" target="_blank" rel="noopener" title="Open saved PDF" style="text-decoration:none;color:var(--accent);border-color:var(--accent-soft)">↗</a>':'';
     return '<div class="trow" style="grid-template-columns:'+cols+'">'+
       '<span class="receiptNo">'+esc(p.receiptNo)+'</span>'+
       '<span class="tCell">'+esc(t?t.name:(p.tenantName||"—"))+'</span>'+
+      '<span class="tCell">'+place+'</span>'+
       '<span class="green">'+RM(p.amount)+'</span>'+
       '<span class="tCell">'+MONTHS[p.forMonth]+' '+p.forYear+'</span>'+
       '<span class="tCell">'+esc(p.date)+'</span>'+
@@ -726,7 +753,7 @@ function viewRent(){
     dueBanner+dueCards+
     '<div class="cardHead" style="margin-top:28px"><span class="cardTitle">Payment history</span>'+
     '<select class="select" style="width:auto" onchange="rentFilter=this.value;render()">'+opts+'</select></div>'+
-    '<div class="tbl"><div class="thead" style="grid-template-columns:'+cols+'"><span>Receipt</span><span>Tenant</span><span>Amount</span><span>For</span><span>Paid on</span><span></span></div>'+
+    '<div class="tbl"><div class="thead" style="grid-template-columns:'+cols+'"><span>Receipt</span><span>Tenant</span><span>Property · Room</span><span>Amount</span><span>For</span><span>Paid on</span><span></span></div>'+
     (hist||'<div class="empty">No payments recorded yet.</div>')+'</div></div>';
 }
 
@@ -1019,7 +1046,7 @@ function openAddProperty(){
 }
 async function doAddProperty(){
   var name=el("ap_name").value.trim(); if(!name) return;
-  var row={id:uid(),name:name,address:el("ap_addr").value.trim()};
+  var row={id:uid(),name:name,address:el("ap_addr").value.trim(),wholeHouse:"",houseType:""};
   DB.Properties.push(row); openProp=row.id; closeModal(); render();
   await insertRow("Properties",row);
 }
@@ -1054,32 +1081,106 @@ async function delRoom(roomId){
 
 // new tenant
 function openNewTenant(){
+  if(!DB.Properties.length){ modal('<h3 class="modalTitle">New tenant</h3><div class="empty">No properties yet. Add a house first in “Houses & Rooms”.</div>'); return; }
   var vac=vacantRooms();
-  if(!vac.length){ modal('<h3 class="modalTitle">New tenant</h3><div class="empty">No vacant rooms. Add a room or free one up first.</div>'); return; }
-  var roomOpts=vac.map(function(r){return '<option value="'+r.id+'" data-rent="'+r.rent+'">'+esc(r.propName)+' · '+esc(r.label)+' ('+RM(r.rent)+')</option>';}).join("");
+  // show ALL properties (so a newly created one always appears), with vacant counts
+  var propOpts=DB.Properties.map(function(p){
+    var n=vac.filter(function(r){return r.propId===p.id;}).length;
+    var tag=isWholeHouse(p.id) ? (n>0?'whole-house · available':'whole-house · occupied') : (n+' vacant');
+    return '<option value="'+p.id+'">'+esc(p.name)+' ('+tag+')</option>';
+  }).join("");
+  // default the selection to the first property that has a vacant room, if any
+  var firstWithVac=DB.Properties.find(function(p){ return vac.some(function(r){return r.propId===p.id;}); });
   modal('<h3 class="modalTitle">New tenant</h3>'+
-    '<p class="modalSub">An agreement is generated automatically based on the house type.</p>'+
+    '<p class="modalSub">Pick the property, then the room. An agreement is generated automatically.</p>'+
     '<div class="formGrid">'+
       fld("Full name",'<input class="inp" id="nt_name" autofocus>')+
       fld("Phone",'<input class="inp" id="nt_phone">')+
       fld("IC / Passport",'<input class="inp" id="nt_ic">')+
       fld("Email",'<input class="inp" id="nt_email">')+
-      fld("Room",'<select class="inp" id="nt_room" onchange="ntRoomChange()">'+roomOpts+'</select>')+
+      fld("Property",'<select class="inp" id="nt_prop" onchange="ntPropChange()">'+propOpts+'</select>')+
+      '<div id="nt_room_field">'+fld("Room",'<div class="roomPick"><input class="inp" id="nt_room_search" placeholder="Search room…" oninput="ntRoomFilter()" autocomplete="off"><div id="nt_room_list" class="roomList"></div><input type="hidden" id="nt_room"></div>')+'</div>'+
       fld("Move-in date",'<input class="inp" id="nt_movein" type="date" value="'+todayISO()+'">')+
-      fld("Monthly rent (RM)",'<input class="inp" id="nt_rent" type="number" value="'+vac[0].rent+'">')+
-      fld("Deposit (RM)",'<input class="inp" id="nt_deposit" type="number" placeholder="'+(vac[0].rent*2)+'">')+
+      fld("Monthly rent (RM)",'<input class="inp" id="nt_rent" type="number">')+
+      fld("Deposit (RM)",'<input class="inp" id="nt_deposit" type="number">')+
       fld("Agreement (months)",'<input class="inp" id="nt_dur" type="number" value="12">')+
     '</div>'+
     '<div id="nt_house_extra"></div>'+
     '<button class="btn-primary full" id="nt_save" onclick="doNewTenant()">Create tenant & generate agreement</button>');
-  ntRoomChange();
+  if(firstWithVac){ el("nt_prop").value=firstWithVac.id; }
+  ntPropChange();
+}
+// when property changes, rebuild the room list and clear current room choice
+function ntPropChange(){
+  var propId=el("nt_prop").value;
+  el("nt_room").value="";
+  el("nt_room_search").value="";
+  el("nt_room_search").style.borderColor="";
+  el("nt_room_search").placeholder="Search room…";
+  el("nt_house_extra").innerHTML="";
+
+  var roomField=el("nt_room_field");
+  if(isWholeHouse(propId)){
+    // Whole-house rental: no room to choose — hide the field and auto-pick the house unit
+    roomField.style.display="none";
+    var houseRoom=vacantRooms().filter(function(r){return r.propId===propId;})[0];
+    if(houseRoom){
+      el("nt_room").value=houseRoom.id;
+      el("nt_rent").value=houseRoom.rent;
+      el("nt_deposit").placeholder=houseRoom.rent*2;
+      ntRoomChange();   // reveal the whole-house agreement fields
+    } else {
+      // whole-house property with no available unit — show a hint in the extra area
+      el("nt_house_extra").innerHTML='<div class="whNotice">This whole-house property has no available unit. Add one room to represent the house in “Houses & Rooms”.</div>';
+    }
+    return;
+  }
+  // Normal property: show the room picker
+  roomField.style.display="";
+  ntRoomFilter();
+}
+// vacant rooms for the chosen property, filtered by the search box
+function ntRoomFilter(){
+  var propId=el("nt_prop").value;
+  var q=(el("nt_room_search").value||"").toLowerCase();
+  var allVacInProp=vacantRooms().filter(function(r){ return r.propId===propId; });
+  var list=allVacInProp.filter(function(r){ return !q || r.label.toLowerCase().indexOf(q)>=0; });
+  var box=el("nt_room_list");
+  var chosen=el("nt_room").value;
+  if(!allVacInProp.length){
+    // property exists but has no vacant rooms — guide the user
+    box.innerHTML='<div class="roomNone">No vacant rooms in this property. '+
+      '<button type="button" class="link" onclick="addRoomFromTenant(\''+propId+'\')">+ Add a room</button></div>';
+    return;
+  }
+  if(!list.length){ box.innerHTML='<div class="roomNone">No room matches “'+esc(q)+'”</div>'; return; }
+  box.innerHTML=list.map(function(r){
+    return '<button type="button" class="roomOpt'+(chosen===r.id?' sel':'')+'" onclick="ntPickRoom(\''+r.id+'\')">'+
+      '<span class="roomOptLbl">'+esc(r.label)+'</span><span class="roomOptRent">'+RM(r.rent)+'</span></button>';
+  }).join("");
+}
+// quick add-room shortcut from inside the new-tenant dialog
+function addRoomFromTenant(propId){
+  var p=DB.Properties.find(function(x){return x.id===propId;});
+  if(!p) return;
+  closeModal();
+  openAddRoom(propId);
+}
+function ntPickRoom(roomId){
+  el("nt_room").value=roomId;
+  var r=DB.Rooms.find(function(x){return x.id===roomId;});
+  if(r){
+    el("nt_room_search").value=r.label;
+    el("nt_rent").value=r.rent;
+    el("nt_deposit").placeholder=r.rent*2;
+  }
+  ntRoomFilter();      // refresh highlight
+  ntRoomChange();      // reveal whole-house fields if needed
 }
 function ntRoomChange(){
-  ntRentSync();
   var roomId=el("nt_room").value;
   var box=el("nt_house_extra");
-  if(roomIsWholeHouse(roomId)){
-    var rentEl=el("nt_rent"); var rent=rentEl?Number(rentEl.value)||0:0;
+  if(roomId && roomIsWholeHouse(roomId)){
     box.innerHTML='<div class="whNotice">This is a whole-house rental — the full Word agreement will be filled. A few extra details go into it:</div>'+
       '<div class="formGrid">'+
         fld("Occupation (Pekerjaan)",'<input class="inp" id="nt_job">')+
@@ -1114,11 +1215,20 @@ function renderInv(){
 function invSet(i,k,v){ invRows[i][k]=v; }
 function invAdd(){ if(invRows.length<23){ invRows.push({item:"",qty:"",note:""}); renderInv(); } }
 function invDel(i){ invRows.splice(i,1); if(!invRows.length) invRows.push({item:"",qty:"",note:""}); renderInv(); }
-function ntRentSync(){ var sel=el("nt_room"); var rent=sel.options[sel.selectedIndex].getAttribute("data-rent"); el("nt_rent").value=rent; el("nt_deposit").placeholder=rent*2; }
 
 async function doNewTenant(){
   var name=el("nt_name").value.trim(), roomId=el("nt_room").value;
-  if(!name||!roomId) return;
+  if(!name){ el("nt_name").focus(); el("nt_name").style.borderColor="var(--expense)"; return; }
+  if(!roomId){
+    var propId=el("nt_prop").value;
+    if(isWholeHouse(propId)){
+      el("nt_house_extra").innerHTML='<div class="whNotice" style="color:var(--expense);background:#FBEDE9;border:1px solid #EDC9C0">This whole-house property has no available unit to assign. Add one room for it in “Houses &amp; Rooms” first.</div>';
+      return;
+    }
+    var srch=el("nt_room_search");
+    if(srch){ srch.style.borderColor="var(--expense)"; srch.placeholder="Please pick a room first"; srch.focus(); }
+    return;
+  }
   var rent=Number(el("nt_rent").value);
   var whole=roomIsWholeHouse(roomId);
   var t={id:uid(),name:name,phone:el("nt_phone").value.trim(),ic:el("nt_ic").value.trim(),
