@@ -1461,8 +1461,12 @@ async function saveRoomEdit(propId,roomId){
   await updateRow("Rooms",r);
 }
 async function delRoom(roomId){
-  if(!confirm("Delete this room?")) return;
-  DB.Rooms=DB.Rooms.filter(function(r){return r.id!==roomId;}); render();
+  var r=DB.Rooms.find(function(x){return x.id===roomId;});
+  if(!r) return;
+  if(r.tenantId){ alert("This room is occupied. Move the tenant out before deleting the room."); return; }
+  var prop=propById(r.propId);
+  if(!confirm("Delete room "+(r.label||"")+(prop?(" in "+prop.name):"")+"?\n\nThis can't be undone.")) return;
+  DB.Rooms=DB.Rooms.filter(function(x){return x.id!==roomId;}); render();
   await deleteRow("Rooms",roomId);
 }
 
@@ -1623,6 +1627,21 @@ async function doNewTenant(){
   }
   var rent=Number(el("nt_rent").value);
   var whole=roomIsWholeHouse(roomId);
+
+  // Gentle completeness check — agreement reads better with these filled.
+  var missing=[];
+  if(!el("nt_phone").value.trim()) missing.push("phone");
+  if(!el("nt_ic").value.trim()) missing.push("IC/passport");
+  if(!el("nt_movein").value) missing.push("move-in date");
+  if(!(rent>0)) missing.push("monthly rent");
+  if(whole){
+    if(!el("nt_addr").value.trim()) missing.push("permanent address");
+    if(!el("nt_job").value.trim()) missing.push("occupation");
+  }
+  if(missing.length){
+    if(!confirm("Some details are blank: "+missing.join(", ")+".\n\nThese will appear empty on the agreement. Create the tenant anyway?")) return;
+  }
+
   var t={id:uid(),name:name,phone:el("nt_phone").value.trim(),ic:el("nt_ic").value.trim(),
     email:el("nt_email").value.trim(),roomId:roomId,moveIn:el("nt_movein").value,
     rent:rent,deposit:Number(el("nt_deposit").value)||rent*2,duration:Number(el("nt_dur").value)||12,
@@ -1784,9 +1803,29 @@ function openPayment(tenantId){
 }
 async function doPayment(tenantId){
   var t=tenantById(tenantId);
+  var amount=Number(el("pm_amt").value);
+  var forMonth=Number(el("pm_month").value), forYear=Number(el("pm_year").value);
+
+  // Guard 1 — amount must be valid and positive
+  if(!(amount>0)){ el("pm_amt").style.borderColor="var(--expense)"; el("pm_amt").focus(); return; }
+
+  // Guard 2 — already a payment for this tenant + month + year?
+  var dup=DB.Payments.find(function(p){ return p.tenantId===t.id && p.forMonth===forMonth && p.forYear===forYear; });
+  if(dup){
+    if(!confirm(t.name+" already has a payment recorded for "+MONTHS[forMonth]+" "+forYear+" ("+RM(dup.amount)+", receipt "+dup.receiptNo+").\n\nRecord another payment for the same month anyway?")) return;
+  }
+
+  // Guard 3 — amount differs from the expected monthly rent?
+  var rent=Number(t.rent)||0;
+  if(rent>0 && amount!==rent){
+    var diff = amount<rent ? ("This is LESS than the monthly rent of "+RM(rent)+" (a partial payment).")
+                           : ("This is MORE than the monthly rent of "+RM(rent)+" (an overpayment or advance).");
+    if(!confirm("You entered "+RM(amount)+". "+diff+"\n\nIs that correct?")) { el("pm_amt").focus(); el("pm_amt").select&&el("pm_amt").select(); return; }
+  }
+
   var p={id:uid(),receiptNo:"RC-"+uid().toUpperCase().slice(0,6),tenantId:t.id,tenantName:t.name,roomId:t.roomId,
-    amount:Number(el("pm_amt").value),date:el("pm_date").value,
-    forMonth:Number(el("pm_month").value),forYear:Number(el("pm_year").value),method:el("pm_method").value,receiptUrl:""};
+    amount:amount,date:el("pm_date").value,
+    forMonth:forMonth,forYear:forYear,method:el("pm_method").value,receiptUrl:""};
   DB.Payments.unshift(p); closeModal();
   await insertRow("Payments",p);
   openReceipt(p.id);
@@ -1817,8 +1856,11 @@ async function mirrorReceipt(paymentId){
   }
 }
 async function delPayment(id){
-  if(!confirm("Delete this payment?")) return;
-  DB.Payments=DB.Payments.filter(function(p){return p.id!==id;}); render();
+  var p=DB.Payments.find(function(x){return x.id===id;});
+  if(!p) return;
+  var who=p.tenantName||(tenantById(p.tenantId)||{}).name||"this tenant";
+  if(!confirm("Delete the "+RM(p.amount)+" payment from "+who+" for "+MONTHS[p.forMonth]+" "+p.forYear+" (receipt "+p.receiptNo+")?\n\nThis can't be undone, and it will make that month show as unpaid again.")) return;
+  DB.Payments=DB.Payments.filter(function(x){return x.id!==id;}); render();
   await deleteRow("Payments",id);
 }
 
@@ -1846,7 +1888,10 @@ function openReceipt(paymentId){
 // move out
 async function moveOut(tenantId){
   var t=tenantById(tenantId);
-  if(!confirm("Move out "+t.name+"? This frees the room.")) return;
+  var d=dueList().find(function(x){return x.tenant.id===tenantId;});
+  var warn="Move out "+t.name+"? This frees the room and marks the tenancy ended.";
+  if(d){ warn+="\n\nNote: this tenant still owes "+RM(d.amountOwed)+" ("+d.monthsOwed+" month"+(d.monthsOwed>1?"s":"")+"). Settle or record it before moving out if needed."; }
+  if(!confirm(warn)) return;
   var room=DB.Rooms.find(function(r){return r.tenantId===tenantId;});
   if(room){ room.tenantId=""; }
   t.active=false; t.movedOut=todayISO();
@@ -1864,7 +1909,10 @@ async function addExpense(){
   await insertRow("Expenses",e);
 }
 async function delExpense(id){
-  DB.Expenses=DB.Expenses.filter(function(e){return e.id!==id;}); render();
+  var e=DB.Expenses.find(function(x){return x.id===id;});
+  if(!e) return;
+  if(!confirm("Delete this expense — "+esc(e.desc||e.category)+" ("+RM(e.amount)+", "+dmyDate(e.date)+")?\n\nThis can't be undone.")) return;
+  DB.Expenses=DB.Expenses.filter(function(x){return x.id!==id;}); render();
   await deleteRow("Expenses",id);
 }
 
