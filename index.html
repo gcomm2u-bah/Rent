@@ -1065,23 +1065,12 @@ function viewTenants(){
       '<div class="tEnd">'+remind+'<button class="btn-mini" onclick="openPayment(\''+t.id+'\')">Receipt</button>'+
       '<button class="btn-ghost-mini" onclick="moveOut(\''+t.id+'\')">Move out</button></div></div>';
   }).join("");
-  var pastList=filt(past);
-  var pastRows=pastList.map(function(t){return '<div class="trow" style="grid-template-columns:'+cols+';opacity:.7">'+
-      '<div><button class="tNameBtn" onclick="openTenantDetail(\''+t.id+'\')">'+esc(t.name)+'</button><div class="tPhone">'+esc(t.phone)+'</div></div>'+
-      '<span class="tCell">—</span><span class="tCell">'+RM(t.rent)+'</span><span class="tCell">'+esc(t.moveIn)+'</span>'+
-      '<span class="tCell">Moved out '+esc(t.movedOut)+'</span><span></span></div>';}).join("");
-  var pastHtml=pastList.length?
-    '<button class="pastToggle" onclick="pastOpen=!pastOpen;render()">'+
-      '<span class="chev" style="transform:'+(pastOpen?'rotate(90deg)':'none')+'">›</span>'+
-      'Past tenants <span class="pastCount">'+pastList.length+'</span></button>'+
-    (pastOpen?'<div class="tbl" style="margin-top:10px">'+pastRows+'</div>':'')
-    :'';
   return '<div class="page">'+
-    pageHead("Tenants",active.length+" active · "+past.length+" past",
+    pageHead("Tenants",active.length+" active"+(past.length?" · "+past.length+" past (in Reports)":""),
       '<button class="btn-primary" onclick="openNewTenant()">+ New tenant</button>')+
     '<div class="searchBar">🔍<input placeholder="Search by name or phone…" value="'+esc(tenantQuery)+'" oninput="tenantQuery=this.value;render();requeryFocus()" id="tq"></div>'+
     '<div class="tbl"><div class="thead" style="grid-template-columns:'+cols+'"><span>Tenant</span><span>Room</span><span>Rent</span><span>Move-in</span><span>Agreement</span><span></span></div>'+
-    (rowsHtml||emptyState("tenants","No tenants yet","Add your first tenant to start tracking rent, receipts, and agreements.","Add a tenant","openNewTenant()"))+'</div>'+pastHtml+'</div>';
+    (rowsHtml||emptyState("tenants","No tenants yet","Add your first tenant to start tracking rent, receipts, and agreements.","Add a tenant","openNewTenant()"))+'</div></div>';
 }
 function requeryFocus(){var i=el("tq"); if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length);}}
 
@@ -1449,7 +1438,32 @@ function viewReports(){
       '<span class="legItem"><span class="legDot" style="background:var(--expense)"></span> Expense</span></div></div>'+
     '<div class="card" style="margin-top:22px"><div class="cardTitle">By house</div>'+
       '<div class="tbl" style="margin-top:14px"><div class="thead" style="grid-template-columns:2fr 1fr 1fr 1fr 1fr"><span>House</span><span>Rooms</span><span>Income</span><span>Expense</span><span>Net</span></div>'+byProp+'</div></div>'+
+    pastTenantsBlock()+
     '</div>';
+}
+// Past (moved-out) tenants — kept for records (LHDN ~7yr), collapsible
+function pastTenantsBlock(){
+  var past=DB.Tenants.filter(function(t){return t.active===false;})
+    .sort(function(a,b){ return String(b.movedOut||"").localeCompare(String(a.movedOut||"")); });
+  if(!past.length) return '';
+  var cols="1.6fr 1.2fr .8fr 1fr 1fr";
+  var rows=past.map(function(t){
+    var room=roomById(t.roomId);
+    var dep=(t.depositReturned!=null)?('returned '+RM(t.depositReturned||0)+(Number(t.depositWithheld)>0?' · withheld '+RM(t.depositWithheld):'')):'—';
+    return '<div class="trow" style="grid-template-columns:'+cols+';opacity:.8">'+
+      '<div><button class="tNameBtn" onclick="openTenantDetail(\''+t.id+'\')">'+esc(t.name)+'</button><div class="tPhone">'+esc(t.phone||"")+'</div></div>'+
+      '<span class="tCell">'+esc(t.moveIn||"—")+' → '+esc(t.movedOut||"—")+'</span>'+
+      '<span class="tCell">'+RM(t.rent)+'</span>'+
+      '<span class="tCell">'+esc(dep)+'</span>'+
+      '<div class="tEnd"><button class="btn-ghost-mini" onclick="openStatement(\''+t.id+'\')">Statement</button></div></div>';
+  }).join("");
+  return '<div class="card" style="margin-top:22px">'+
+    '<button class="pastToggle" style="margin:0" onclick="pastOpen=!pastOpen;render()">'+
+      '<span class="chev" style="transform:'+(pastOpen?'rotate(90deg)':'none')+'">›</span>'+
+      'Past tenants <span class="pastCount">'+past.length+'</span></button>'+
+    (pastOpen?'<div class="tbl" style="margin-top:14px"><div class="thead" style="grid-template-columns:'+cols+'"><span>Tenant</span><span>Tenancy</span><span>Rent</span><span>Deposit</span><span></span></div>'+rows+'</div>'+
+      '<p class="hint" style="margin-top:12px">Kept for your records. Click a name for full history, or Statement for a printable account.</p>':'')+
+  '</div>';
 }
 function exportCSV(){
   var monthly=MONTHS.map(function(m,i){
