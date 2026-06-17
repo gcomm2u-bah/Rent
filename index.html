@@ -64,6 +64,8 @@ h1{font-family:var(--display);font-size:32px;font-weight:600;letter-spacing:-.02
 .btn-mini:hover{background:#185640}
 .btn-ghost-mini{background:transparent;color:var(--ink-soft);border:1px solid var(--line);padding:6px 12px;border-radius:8px;font:600 12px var(--body);cursor:pointer;white-space:nowrap}
 .btn-ghost-mini:hover{border-color:var(--ink-faint)}
+.btn-remind{background:#E8833A;color:#fff;border:none;padding:6px 12px;border-radius:8px;font:600 12px var(--body);cursor:pointer;white-space:nowrap}
+.btn-remind:hover{background:#D5722C}
 .icon-btn{background:transparent;border:1px solid var(--line);border-radius:7px;padding:5px;color:var(--ink-soft);cursor:pointer;display:inline-flex}
 .icon-btn:hover{color:var(--expense);border-color:var(--expense)}
 .link{display:inline-flex;align-items:center;gap:4px;background:none;border:none;color:var(--accent);font:600 12.5px var(--body);cursor:pointer}
@@ -82,7 +84,7 @@ h1{font-family:var(--display);font-size:32px;font-weight:600;letter-spacing:-.02
 .ledgerVal.big{font-size:30px}
 .ledgerTrend{font-size:12px;color:var(--ink-soft);margin-top:5px}
 
-.dashGrid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px}
+.dashGrid{display:grid;grid-template-columns:2fr 1fr;gap:18px;margin-top:18px;align-items:start}
 .full-col{grid-column:1/-1}
 .occRow{display:flex;gap:18px;align-items:center}
 .occLine{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink-soft);margin-bottom:6px}
@@ -90,11 +92,16 @@ h1{font-family:var(--display);font-size:32px;font-weight:600;letter-spacing:-.02
 .dot.occ{background:var(--accent)}.dot.vac{background:var(--vacant)}
 .occBarTrack{height:8px;background:var(--line);border-radius:20px;overflow:hidden;margin-top:8px}
 .occBarFill{height:100%;background:var(--accent);border-radius:20px;transition:width .6s}
-.vacantChips{display:flex;flex-wrap:wrap;gap:6px;margin-top:16px}
-.vacChip{font-size:11.5px;background:#FBF6EA;color:var(--vacant);border:1px solid #EDD9B0;padding:4px 9px;border-radius:7px;font-weight:600}
-.vacChipMore{font-size:11.5px;color:var(--ink-faint);padding:4px 6px;font-weight:600}
+.vacTitle{font-size:11.5px;font-weight:700;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.05em;margin:18px 0 10px;padding-top:16px;border-top:1px solid var(--line)}
+.vacTree{display:flex;flex-direction:column;gap:12px;max-height:300px;overflow-y:auto}
+.vacBranch{}
+.vacBranchHead{display:flex;align-items:center;gap:10px;font-family:var(--display);font-weight:600;font-size:14px;color:var(--ink);margin-bottom:7px}
+.vacBranchCount{font-size:10.5px;font-weight:700;color:var(--vacant);background:#FBF6EA;border:1px solid #EDD9B0;padding:1px 8px;border-radius:20px;letter-spacing:.02em}
+.vacBranchRooms{display:flex;flex-wrap:wrap;gap:6px;padding-left:14px;border-left:2px solid var(--line);margin-left:3px}
+.vacLeaf{font-size:12px;font-weight:600;color:var(--vacant);background:#FBF6EA;border:1px solid #EDD9B0;padding:3px 10px;border-radius:7px}
 .pctTag{background:var(--accent-soft);color:var(--accent);font-weight:700;font-size:13px;padding:3px 10px;border-radius:20px}
 .collectRow{display:flex;gap:28px}
+.collectStack{display:flex;flex-direction:column;gap:16px}
 .miniLbl{font-size:11.5px;color:var(--ink-faint);font-weight:600}
 .miniVal{font-family:var(--display);font-size:19px;font-weight:600;margin-top:4px}
 
@@ -198,6 +205,18 @@ h1{font-family:var(--display);font-size:32px;font-weight:600;letter-spacing:-.02
 .trow{padding:14px 18px;border-bottom:1px solid var(--line);font-size:13.5px}
 .trow:last-child{border-bottom:none}
 .tName{font-weight:600}
+.tNameBtn{font-weight:600;font-size:13.5px;color:var(--ink);background:none;border:none;padding:0;cursor:pointer;text-align:left;font-family:var(--body)}
+.tNameBtn:hover{color:var(--accent);text-decoration:underline}
+.tdHead{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:16px}
+.tdSub{font-size:13px;color:var(--ink-soft);margin-top:6px}
+.tdStatus{font-size:11.5px;font-weight:700;padding:5px 12px;border-radius:8px;white-space:nowrap}
+.tdStatus.ok{background:var(--accent-soft);color:var(--accent)}
+.tdStatus.due{background:#FBF6EA;color:var(--vacant)}
+.tdStatus.late{background:#FBEDE9;color:var(--expense)}
+.tdStatus.past{background:#F2EDE3;color:var(--ink-soft)}
+.tdStats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding:16px;background:#FBF9F4;border:1px solid var(--line);border-radius:12px;margin-bottom:16px}
+.tdActions{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+.tdHistTitle{font-family:var(--display);font-size:16px;font-weight:600;margin-bottom:4px}
 .tPhone{font-size:12px;color:var(--ink-soft);margin-top:2px}
 .tCell{color:var(--ink-soft)}
 .tEnd{display:flex;gap:6px;justify-content:flex-end}
@@ -271,7 +290,12 @@ h1{font-family:var(--display);font-size:32px;font-weight:600;letter-spacing:-.02
 @media print{
   body *{visibility:hidden}
   #printable,#printable *{visibility:visible}
-  #printable{position:absolute;left:0;top:0;width:100%;border:none}
+  /* release the modal's scroll box so the whole document flows across pages */
+  .overlay{position:static!important;background:none!important;backdrop-filter:none!important;display:block!important;padding:0!important}
+  .modal{position:static!important;max-height:none!important;max-width:none!important;overflow:visible!important;box-shadow:none!important;padding:0!important;border-radius:0!important;width:auto!important}
+  .modalClose{display:none!important}
+  #printable{position:absolute;left:0;top:0;width:100%;border:none;max-height:none!important;overflow:visible!important}
+  html,body{height:auto!important;overflow:visible!important}
 }
 @media(max-width:820px){
   .app{flex-direction:column}
@@ -542,9 +566,19 @@ function viewDashboard(){
     ledgerCell("Year to date",RM(s.yi-s.ye),RM(s.yi)+" in · "+RM(s.ye)+" out","var(--ink)")+
   '</div>';
 
-  var vacChips=vac.length?'<div class="vacantChips">'+
-    vac.slice(0,8).map(function(r){return '<span class="vacChip">'+esc(r.propName)+' · '+esc(r.label)+'</span>';}).join("")+
-    (vac.length>8?'<span class="vacChipMore">+'+(vac.length-8)+' more</span>':'')+'</div>':'';
+  // group vacant rooms by property → branch list (CasaMawar → CM-01, CM-02…)
+  var vacByProp={};
+  vac.forEach(function(r){ (vacByProp[r.propName]=vacByProp[r.propName]||[]).push(r); });
+  var vacBranches=Object.keys(vacByProp).length?
+    '<div class="vacTree">'+Object.keys(vacByProp).map(function(pn){
+      var rooms=vacByProp[pn];
+      return '<div class="vacBranch"><div class="vacBranchHead">'+esc(pn)+
+        '<span class="vacBranchCount">'+rooms.length+' vacant</span></div>'+
+        '<div class="vacBranchRooms">'+rooms.map(function(r){
+          return '<span class="vacLeaf">'+esc(r.label)+'</span>';
+        }).join("")+'</div></div>';
+    }).join("")+'</div>'
+    :'<div class="empty" style="padding:10px 2px">All rooms occupied — nothing vacant.</div>';
 
   var occCard='<div class="card"><div class="cardHead"><span class="cardTitle">Occupancy</span>'+
     '<button class="link" onclick="go(\'properties\')">View rooms ›</button></div>'+
@@ -552,11 +586,12 @@ function viewDashboard(){
       '<div class="occLine"><span class="dot occ"></span> <b style="color:var(--ink)">'+occ.length+'</b>&nbsp;occupied</div>'+
       '<div class="occLine"><span class="dot vac"></span> <b style="color:var(--ink)">'+vac.length+'</b>&nbsp;vacant</div>'+
       '<div class="occBarTrack"><div class="occBarFill" style="width:'+occRate+'%"></div></div>'+
-    '</div></div>'+vacChips+'</div>';
+    '</div></div>'+
+    '<div class="vacTitle">Vacant rooms by property</div>'+vacBranches+'</div>';
 
   var collectCard='<div class="card"><div class="cardHead"><span class="cardTitle">Rent collection</span><span class="pctTag">'+collected+'%</span></div>'+
     '<div class="occBarTrack" style="height:10px;margin:8px 0 14px"><div class="occBarFill" style="width:'+Math.min(collected,100)+'%"></div></div>'+
-    '<div class="collectRow"><div><div class="miniLbl">Collected</div><div class="miniVal">'+RM(s.mi)+'</div></div>'+
+    '<div class="collectStack"><div><div class="miniLbl">Collected</div><div class="miniVal">'+RM(s.mi)+'</div></div>'+
     '<div><div class="miniLbl">Outstanding</div><div class="miniVal" style="color:var(--expense)">'+RM(Math.max(s.expected-s.mi,0))+'</div></div></div></div>';
 
   var lateCount=due.filter(function(d){return d.late;}).length;
@@ -683,9 +718,9 @@ function viewTenants(){
     var room=roomById(t.roomId);
     var d=dueByTenant[t.id];
     var lateBadge=(d&&d.late)?'<span class="lateBadge">Late</span>':'';
-    var remind=(d&&t.phone)?'<button class="btn-ghost-mini" onclick="openRemind(\''+t.id+'\')">Remind</button>':'';
+    var remind=(d&&t.phone)?'<button class="btn-remind" onclick="openRemind(\''+t.id+'\')">Remind</button>':'';
     return '<div class="trow" style="grid-template-columns:'+cols+'">'+
-      '<div><div class="tName">'+esc(t.name)+lateBadge+'</div><div class="tPhone">'+esc(t.phone)+'</div></div>'+
+      '<div><button class="tNameBtn" onclick="openTenantDetail(\''+t.id+'\')">'+esc(t.name)+'</button>'+lateBadge+'<div class="tPhone">'+esc(t.phone)+'</div></div>'+
       '<span class="tCell">'+(room?esc(room.propName)+' · '+esc(room.label):'—')+'</span>'+
       '<span class="tCell">'+RM(t.rent)+'</span>'+
       '<span class="tCell">'+esc(t.moveIn)+'</span>'+
@@ -695,7 +730,7 @@ function viewTenants(){
   }).join("");
   var pastHtml=filt(past).length?'<div class="subHead">Past tenants</div><div class="tbl">'+
     filt(past).map(function(t){return '<div class="trow" style="grid-template-columns:'+cols+';opacity:.6">'+
-      '<div><div class="tName">'+esc(t.name)+'</div><div class="tPhone">'+esc(t.phone)+'</div></div>'+
+      '<div><button class="tNameBtn" onclick="openTenantDetail(\''+t.id+'\')">'+esc(t.name)+'</button><div class="tPhone">'+esc(t.phone)+'</div></div>'+
       '<span class="tCell">—</span><span class="tCell">'+RM(t.rent)+'</span><span class="tCell">'+esc(t.moveIn)+'</span>'+
       '<span class="tCell">Moved out '+esc(t.movedOut)+'</span><span></span></div>';}).join("")+'</div>':'';
   return '<div class="page">'+
@@ -706,6 +741,53 @@ function viewTenants(){
     (rowsHtml||'<div class="empty">No tenants yet. Add your first one.</div>')+'</div>'+pastHtml+'</div>';
 }
 function requeryFocus(){var i=el("tq"); if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length);}}
+
+// Tenant detail popup: profile + full payment history with printable receipts
+function openTenantDetail(tenantId){
+  var t=tenantById(tenantId); if(!t) return;
+  var room=roomById(t.roomId);
+  var pays=DB.Payments.filter(function(p){return p.tenantId===t.id;})
+    .sort(function(a,b){ return (b.forYear-a.forYear)||(b.forMonth-a.forMonth); });
+  var paid=pays.reduce(function(s,p){return s+(+p.amount);},0);
+  var d=dueList().find(function(x){return x.tenant.id===t.id;});
+  var status=t.active===false
+    ? '<span class="tdStatus past">Moved out '+esc(t.movedOut||"")+'</span>'
+    : (d?(d.late?'<span class="tdStatus late">Late · owes '+RM(d.amountOwed)+'</span>':'<span class="tdStatus due">Owes '+RM(d.amountOwed)+'</span>')
+        :'<span class="tdStatus ok">Paid up</span>');
+
+  var rows=pays.map(function(p){
+    var pdf=p.receiptUrl?'<a class="icon-btn" href="'+esc(p.receiptUrl)+'" target="_blank" rel="noopener" title="Open saved PDF" style="text-decoration:none;color:var(--accent);border-color:var(--accent-soft)">↗</a>':'';
+    return '<div class="trow" style="grid-template-columns:1.1fr .8fr 1fr 1fr auto">'+
+      '<span class="receiptNo">'+esc(p.receiptNo)+'</span>'+
+      '<span class="green">'+RM(p.amount)+'</span>'+
+      '<span class="tCell">'+MONTHS[p.forMonth]+' '+p.forYear+'</span>'+
+      '<span class="tCell">'+esc(p.date)+'</span>'+
+      '<div class="tEnd">'+pdf+'<button class="btn-mini" onclick="openReceipt(\''+p.id+'\')">Receipt</button></div></div>';
+  }).join("");
+
+  var histTable=pays.length
+    ? '<div class="tbl" style="margin-top:6px"><div class="thead" style="grid-template-columns:1.1fr .8fr 1fr 1fr auto"><span>Receipt</span><span>Amount</span><span>For</span><span>Paid on</span><span></span></div>'+rows+'</div>'
+    : '<div class="empty">No payments recorded yet for this tenant.</div>';
+
+  modal('<div class="tdHead"><div>'+
+      '<h3 class="modalTitle">'+esc(t.name)+'</h3>'+
+      '<div class="tdSub">'+(room?esc(room.propName)+' · '+esc(room.label):'No room')+' · '+esc(t.phone||"no phone")+'</div></div>'+
+      status+
+    '</div>'+
+    '<div class="tdStats">'+
+      '<div><div class="miniLbl">Monthly rent</div><div class="miniVal">'+RM(t.rent)+'</div></div>'+
+      '<div><div class="miniLbl">Total paid</div><div class="miniVal">'+RM(paid)+'</div></div>'+
+      '<div><div class="miniLbl">Payments</div><div class="miniVal">'+pays.length+'</div></div>'+
+      '<div><div class="miniLbl">Move-in</div><div class="miniVal" style="font-size:14px">'+esc(t.moveIn||"—")+'</div></div>'+
+    '</div>'+
+    '<div class="tdActions">'+
+      (t.active!==false?'<button class="btn-primary" onclick="closeModal();openPayment(\''+t.id+'\')">+ Record payment</button>':'')+
+      '<button class="btn-ghost" onclick="closeModal();openAgreementFor(\''+t.id+'\')">📄 Agreement</button>'+
+      (d&&t.phone?'<button class="btn-remind" onclick="closeModal();openRemind(\''+t.id+'\')">Remind</button>':'')+
+    '</div>'+
+    '<div class="tdHistTitle">Payment history</div>'+histTable+
+    '<button class="btn-ghost full" onclick="closeModal()" style="margin-top:14px">Close</button>');
+}
 
 // ---------- Rent ----------
 function viewRent(){
