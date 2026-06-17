@@ -589,7 +589,7 @@ function viewDashboard(){
     '</div></div>'+
     '<div class="vacTitle">Vacant rooms by property</div>'+vacBranches+'</div>';
 
-  var collectCard='<div class="card"><div class="cardHead"><span class="cardTitle">Rent collection</span><span class="pctTag">'+collected+'%</span></div>'+
+  var collectCard='<div class="card"><div class="cardHead"><span class="cardTitle">Rent collection · '+MONTHS[s.m]+'</span><span class="pctTag">'+collected+'%</span></div>'+
     '<div class="occBarTrack" style="height:10px;margin:8px 0 14px"><div class="occBarFill" style="width:'+Math.min(collected,100)+'%"></div></div>'+
     '<div class="collectStack"><div><div class="miniLbl">Collected</div><div class="miniVal">'+RM(s.mi)+'</div></div>'+
     '<div><div class="miniLbl">Outstanding</div><div class="miniVal" style="color:var(--expense)">'+RM(Math.max(s.expected-s.mi,0))+'</div></div></div></div>';
