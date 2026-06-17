@@ -31,6 +31,8 @@ body{background:var(--bg);color:var(--ink);font-family:var(--body);min-height:10
 .navbtn:hover{background:rgba(255,255,255,.55)}
 .navbtn.active{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.04)}
 .navbtn .badge{margin-left:auto;background:var(--expense);color:#fff;font-size:11px;font-weight:700;padding:1px 7px;border-radius:20px}
+.nav-short{display:none}
+.mobileTop{display:none}
 .sideFoot{margin-top:auto;display:flex;gap:8px;padding:16px 8px 0;border-top:1px solid var(--line)}
 .sideStat{flex:1;display:flex;flex-direction:column}
 .sideStatNum{font-family:var(--display);font-size:24px;font-weight:600;color:var(--accent);line-height:1}
@@ -316,17 +318,89 @@ h1{font-family:var(--display);font-size:32px;font-weight:600;letter-spacing:-.02
   html,body{height:auto!important;overflow:visible!important}
 }
 @media(max-width:820px){
-  .app{flex-direction:column}
-  .sidebar{width:100%;height:auto;position:static;flex-direction:row;flex-wrap:wrap;align-items:center;padding:14px}
-  .nav{flex-direction:row;flex-wrap:wrap;flex:1}
-  .navbtn{width:auto}
-  .sideFoot{border:none;padding:0;margin:0;gap:14px}
-  .page{padding:22px 16px}
+  .app{flex-direction:column;padding-bottom:64px}
+
+  /* Sidebar → fixed bottom tab bar (thumb-reachable) */
+  .sidebar{position:fixed;bottom:0;left:0;right:0;top:auto;width:100%;height:58px;
+    flex-direction:row;align-items:stretch;padding:0;border-top:1px solid var(--line);
+    border-right:none;background:var(--surface);z-index:50;box-shadow:0 -2px 12px rgba(0,0,0,.05)}
+  .brand{display:none}
+  .sideFoot{display:none}
+  .syncDot{display:none}
+  .nav{flex-direction:row;flex:1;gap:0;justify-content:space-around}
+  .navbtn{flex-direction:column;gap:3px;width:auto;flex:1;justify-content:center;
+    padding:6px 2px;border-radius:0;font-size:9.5px;text-align:center;min-width:0}
+  .navbtn span{font-size:9px;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .nav-full{display:none}
+  .nav-short{display:inline}
+  .navbtn.active{background:none;color:var(--accent);box-shadow:none}
+  .navbtn.active svg{stroke:var(--accent)}
+  .navbtn .badge{position:absolute;top:3px;right:50%;margin-right:-18px;margin-left:0;font-size:9px;padding:0 5px}
+  /* a slim top bar shows the app name + sync state, since the sidebar moved down */
+  .main{position:relative}
+  .mobileTop{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;
+    border-bottom:1px solid var(--line);background:var(--surface);position:sticky;top:0;z-index:40}
+  .mobileTop .mt-name{font-family:var(--display);font-size:18px;font-weight:600}
+  .mobileTop .mt-sync{font-size:11px;color:var(--ink-faint);display:flex;align-items:center;gap:6px}
+  .mobileTop .mt-sync i{width:7px;height:7px;border-radius:50%;background:var(--accent);display:inline-block}
+  .mobileTop .mt-sync.saving i{background:var(--vacant);animation:pulse 1s infinite}
+  .mobileTop .mt-sync.err i{background:var(--expense)}
+
+  .page{padding:18px 14px}
+  h1{font-size:26px}
+  .pageHead{gap:12px}
+  .headActions{width:100%;flex-wrap:wrap}
+  .headActions .btn-primary,.headActions .btn-ghost{flex:1;justify-content:center;min-width:130px}
+
+  /* Ledger strip → 2-up grid instead of cramped single row */
+  .ledgerStrip{display:grid;grid-template-columns:1fr 1fr;gap:0;padding:4px 0}
+  .ledgerCell{padding:14px 16px;border-bottom:1px solid var(--line)}
+  .ledgerDiv{display:none}
+  .ledgerVal{font-size:20px!important}
+  .ledgerVal.big{font-size:22px!important}
+
   .dashGrid{grid-template-columns:1fr}
   .formGrid{grid-template-columns:1fr}
-  .expForm{grid-template-columns:1fr 1fr}
+  .expForm{grid-template-columns:1fr;gap:8px}
+
+  /* Tables → each row becomes a stacked card with its values readable */
   .thead{display:none}
-  .trow{grid-template-columns:1fr 1fr!important;gap:6px}
+  .tbl{border:none;background:none}
+  .trow{display:block!important;grid-template-columns:none!important;
+    background:var(--surface);border:1px solid var(--line);border-radius:12px;
+    padding:14px 16px!important;margin-bottom:10px}
+  .trow>span,.trow>div,.trow>button{display:block;width:100%;text-align:left!important;margin:2px 0}
+  .trow .tEnd{display:flex!important;gap:8px;justify-content:flex-start;margin-top:10px;width:auto}
+  .trow .tEnd .btn-mini,.trow .tEnd .btn-ghost-mini,.trow .tEnd .btn-remind{flex:1;text-align:center}
+  .trow .tEnd .icon-btn{flex:0 0 auto}
+
+  /* Outstanding-rent cards full width */
+  .dueGrid{grid-template-columns:1fr}
+  .dueItem{flex-wrap:wrap;gap:10px}
+  .dueRight{width:100%;justify-content:space-between}
+  .dueRight .btn-mini,.dueRight .btn-remind{flex:1}
+
+  /* Room picker tiles a touch bigger for tapping */
+  .roomOpt{padding:9px 13px;min-width:84px}
+  .roomList{max-height:200px}
+
+  /* Modals fill more of the screen, easier to use */
+  .modal{max-width:100%;padding:22px 18px;border-radius:16px 16px 0 0;max-height:92vh}
+  .overlay{align-items:flex-end;padding:0}
+
+  /* Reports chart scrolls rather than squashing */
+  .chart{overflow-x:auto}
+  .chartCol{min-width:22px}
+
+  /* P&L / agreement docs: comfortable padding on small screens */
+  .doc,.receipt{padding:20px 16px}
+  .docCols{grid-template-columns:1fr;gap:14px}
+  .tdStats{grid-template-columns:1fr 1fr}
+}
+@media(max-width:420px){
+  .ledgerStrip{grid-template-columns:1fr}
+  .tdStats{grid-template-columns:1fr 1fr}
+  .navbtn span{font-size:8.5px}
 }
 </style>
 </head>
@@ -465,17 +539,25 @@ var syncState="ok";
 
 // Reflects the save queue: all saved / N pending / failed (with retry).
 function updateSyncUI(){
-  var d=el("syncDot"); if(!d) return;
   var n=saveQueue.length;
   var failed=saveQueue.some(function(it){return (it.tries||0)>=1;}) && !queueRunning;
   var cls, txt;
   if(n===0){ cls=""; txt="All saved"; }
   else if(failed){ cls="err"; txt=n+" unsaved · tap to retry"; }
   else { cls="saving"; txt="Saving "+n+"…"; }
-  d.className="syncDot "+cls;
-  var span=d.querySelector("span"); if(span) span.textContent=txt;
-  d.onclick = (n>0 && failed) ? retryQueueNow : null;
-  d.style.cursor = (n>0 && failed) ? "pointer" : "default";
+  var d=el("syncDot");
+  if(d){
+    d.className="syncDot "+cls;
+    var span=d.querySelector("span"); if(span) span.textContent=txt;
+    d.onclick = (n>0 && failed) ? retryQueueNow : null;
+    d.style.cursor = (n>0 && failed) ? "pointer" : "default";
+  }
+  var mt=el("mtSync");
+  if(mt){
+    mt.className="mt-sync "+cls;
+    var ms=mt.querySelector("span"); if(ms) ms.textContent=txt;
+    mt.onclick = (n>0 && failed) ? retryQueueNow : null;
+  }
 }
 // kept for any old callers
 function setSync(s){ updateSyncUI(); }
@@ -564,17 +646,19 @@ function render(){
   var occ=occupiedRooms().length, vac=vacantRooms().length;
   var due=dueList();
   var nav=[
-    ["dashboard","Overview","M3 12l9-9 9 9M5 10v10h14V10"],
-    ["properties","Houses & Rooms","B"],
-    ["tenants","Tenants","U"],
-    ["rent","Rent & Receipts","R"],
-    ["expenses","Expenses","W"],
-    ["reports","Reports","F"],
-    ["settings","Settings","S"]
+    ["dashboard","Overview","Home"],
+    ["properties","Houses & Rooms","Houses"],
+    ["tenants","Tenants","Tenants"],
+    ["rent","Rent & Receipts","Rent"],
+    ["expenses","Expenses","Expenses"],
+    ["reports","Reports","Reports"],
+    ["settings","Settings","Settings"]
   ];
   var navHtml = nav.map(function(n){
     var badge = (n[0]==="rent" && due.length)?'<span class="badge">'+due.length+'</span>':'';
-    return '<button class="navbtn'+(TAB===n[0]?' active':'')+'" onclick="go(\''+n[0]+'\')">'+icon(n[0])+'<span>'+n[1]+'</span>'+badge+'</button>';
+    var short=n[3]||n[1];
+    return '<button class="navbtn'+(TAB===n[0]?' active':'')+'" onclick="go(\''+n[0]+'\')">'+icon(n[0])+
+      '<span class="nav-full">'+n[1]+'</span><span class="nav-short">'+short+'</span>'+badge+'</button>';
   }).join("");
 
   var body="";
@@ -597,7 +681,7 @@ function render(){
       '</div>'+
       '<div class="syncDot" id="syncDot"><i></i><span>All saved</span></div>'+
     '</aside>'+
-    '<main class="main">'+body+'</main>'+
+    '<main class="main"><div class="mobileTop"><span class="mt-name">Rumah</span><span class="mt-sync" id="mtSync"><i></i><span>All saved</span></span></div>'+body+'</main>'+
   '</div>';
   updateSyncUI();
 }
