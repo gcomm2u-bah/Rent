@@ -129,6 +129,7 @@ h1{font-family:var(--display);font-size:32px;font-weight:600;letter-spacing:-.02
 .dueItem.overdue{border-color:#EDC9C0;background:#FDF1EE}
 .lateBadge{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;background:#E8833A;color:#fff;padding:2px 7px;border-radius:6px;margin-left:8px}
 .overdueBadge{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;background:var(--expense);color:#fff;padding:2px 7px;border-radius:6px;margin-left:8px}
+.leaseSoonTag{font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;background:var(--accent-soft);color:var(--accent);padding:2px 7px;border-radius:6px;margin-left:8px}
 .dueName .lateBadge,.dueName .overdueBadge{vertical-align:middle}
 .owedTag{font-size:11px;color:var(--expense);font-weight:600;margin-top:2px}
 .waPreview{background:#FBF9F4;border:1px solid var(--line);border-radius:11px;padding:16px;font-size:13.5px;line-height:1.55;white-space:pre-wrap;color:var(--ink);max-height:280px;overflow-y:auto;font-family:var(--body)}
@@ -232,6 +233,12 @@ h1{font-family:var(--display);font-size:32px;font-weight:600;letter-spacing:-.02
 .tdStats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding:16px;background:#FBF9F4;border:1px solid var(--line);border-radius:12px;margin-bottom:16px}
 .tdActions{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}
 .tdHistTitle{font-family:var(--display);font-size:16px;font-weight:600;margin-bottom:4px}
+.depositCard{background:#FBF9F4;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:16px}
+.depHead{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-soft);margin-bottom:8px}
+.depRow{display:flex;justify-content:space-between;font-size:13.5px;padding:4px 0}
+.depRow span:last-child{font-weight:600}
+.depNote{font-size:11.5px;color:var(--ink-soft);margin-top:8px;line-height:1.5}
+.plTable td.num{text-align:right;font-variant-numeric:tabular-nums}
 .tPhone{font-size:12px;color:var(--ink-soft);margin-top:2px}
 .tCell{color:var(--ink-soft)}
 .tEnd{display:flex;gap:6px;justify-content:flex-end}
@@ -741,9 +748,9 @@ function dueBadge(d){
 
 function dueList(){
   var now=new Date(); now.setHours(0,0,0,0);
-  // months paid per tenant, keyed by tenantId|year|month (forMonth/forYear of the payment)
-  var paid={};
-  DB.Payments.forEach(function(p){ paid[p.tenantId+"|"+p.forYear+"|"+p.forMonth]=true; });
+  // total amount paid per tenant-month, keyed by tenantId|year|month
+  var paidAmt={};
+  DB.Payments.forEach(function(p){ var k=p.tenantId+"|"+p.forYear+"|"+p.forMonth; paidAmt[k]=(paidAmt[k]||0)+(+p.amount); });
 
   // add N months to a date, clamping the day to the month length
   function addMonths(d, n){
@@ -762,22 +769,29 @@ function dueList(){
     if(isNaN(move)) return null;
 
     // walk each due date (1, 2, 3… months after move-in) up to today
-    var unpaid=[];      // {y, m, due} for each unpaid period whose due date has arrived
+    var rent=+r.rent;
+    var unpaid=[];      // {y, m, due, short} for each period with a remaining balance
+    var amountOwed=0;
     var k=1;
     while(true){
       var due=addMonths(move, k);
       if(due>now) break;                 // not due yet — stop
       var py=due.getFullYear(), pm=due.getMonth();
-      if(!paid[t.id+"|"+py+"|"+pm]){ unpaid.push({y:py, m:pm, due:due}); }
+      var paidThis=paidAmt[t.id+"|"+py+"|"+pm]||0;
+      var short=rent-paidThis;
+      if(short>0.005){                   // still owes something for this month
+        unpaid.push({y:py, m:pm, due:due, short:short});
+        amountOwed+=short;
+      }
       k++;
       if(k>600) break;                   // safety
     }
-    if(!unpaid.length) return null;       // all due rent paid → nothing owed
+    if(!unpaid.length) return null;       // all due rent settled → nothing owed
 
     var monthsOwed=unpaid.length;
-    var amountOwed=monthsOwed*(+r.rent);
     var earliestDue=unpaid[0].due;
     var daysLate=Math.floor((now-earliestDue)/86400000);
+    var partial = unpaid.some(function(u){return u.short < rent-0.005;});
 
     // overdue if the earliest unpaid period is a full month or more past its due date,
     // or more than one period is outstanding
@@ -786,11 +800,10 @@ function dueList(){
     var late = daysLate>=1;               // any unpaid period past its due date
 
     return {room:r, tenant:t,
-            late:late, overdue:overdue,
+            late:late, overdue:overdue, partial:partial,
             monthsOwed:monthsOwed, amountOwed:amountOwed,
             daysLate:daysLate,
-            // keep the old field name used elsewhere: list of unpaid {y,m}
-            overdueMonths:unpaid.map(function(u){return {y:u.y,m:u.m};}),
+            overdueMonths:unpaid.map(function(u){return {y:u.y,m:u.m,short:u.short};}),
             owesCurrent:true };
   }).filter(function(x){ return x; });
 }
@@ -806,9 +819,54 @@ function sums(){
 // ============================================================
 //  VIEWS
 // ============================================================
+// Active tenancies whose lease ends within `windowDays` (or already past).
+// Lease end = move-in + duration months.
+function leaseExpiryList(windowDays){
+  windowDays = windowDays||60;
+  var now=new Date(); now.setHours(0,0,0,0);
+  function addMonths(d,n){ var day=d.getDate(); var t=new Date(d.getFullYear(),d.getMonth()+n,1); var dim=new Date(t.getFullYear(),t.getMonth()+1,0).getDate(); t.setDate(Math.min(day,dim)); t.setHours(0,0,0,0); return t; }
+  return DB.Tenants.filter(function(t){return t.active!==false && t.moveIn;}).map(function(t){
+    var mv=new Date(t.moveIn); if(isNaN(mv)) return null;
+    var end=addMonths(mv, Number(t.duration||12));
+    var days=Math.round((end-now)/86400000);
+    if(days>windowDays) return null;       // not soon enough to flag
+    var room=roomById(t.roomId);
+    return {tenant:t, room:room, end:end, days:days, expired:days<0};
+  }).filter(function(x){return x;}).sort(function(a,b){return a.days-b.days;});
+}
+
+// Renew a tenancy: extend the lease by N months (adds to duration).
+function openRenew(tenantId){
+  var t=tenantById(tenantId); if(!t) return;
+  function addMonths(d,n){ var day=d.getDate(); var x=new Date(d.getFullYear(),d.getMonth()+n,1); var dim=new Date(x.getFullYear(),x.getMonth()+1,0).getDate(); x.setDate(Math.min(day,dim)); return x; }
+  var mv=new Date(t.moveIn);
+  var curEnd=addMonths(mv, Number(t.duration||12));
+  modal('<h3 class="modalTitle">Renew lease</h3>'+
+    '<p class="modalSub">'+esc(t.name)+' · current lease ends '+longDate(curEnd)+'</p>'+
+    '<div class="field" style="margin-bottom:14px"><span class="fieldLbl">Extend by</span>'+
+      '<select class="inp" id="rn_months"><option value="6">6 months</option><option value="12" selected>12 months</option><option value="24">24 months</option></select></div>'+
+    '<div id="rn_preview" class="whNotice" style="margin-bottom:14px"></div>'+
+    '<button class="btn-primary full" onclick="doRenew(\''+tenantId+'\')">Confirm renewal</button>');
+  var upd=function(){
+    var add=Number(el("rn_months").value);
+    var newEnd=addMonths(mv, Number(t.duration||12)+add);
+    el("rn_preview").innerHTML="New lease end: <b>"+longDate(newEnd)+"</b> (total "+(Number(t.duration||12)+add)+" months from move-in).";
+  };
+  el("rn_months").onchange=upd; upd();
+}
+async function doRenew(tenantId){
+  var t=tenantById(tenantId); if(!t) return;
+  var add=Number(el("rn_months").value)||12;
+  t.duration=Number(t.duration||12)+add;
+  closeModal(); render();
+  await updateRow("Tenants",t);
+  toast("Lease renewed — extended by "+add+" months");
+}
+
 function viewDashboard(){
   var s=sums(), occ=occupiedRooms(), vac=vacantRooms(), all=rooms();
   var due=dueList();
+  var leases=leaseExpiryList(60);
   var occRate=all.length?Math.round(occ.length/all.length*100):0;
   var collected=s.expected?Math.round(s.mi/s.expected*100):0;
   var net=s.mi-s.me;
@@ -856,17 +914,35 @@ function viewDashboard(){
     '<button class="link" onclick="go(\'rent\')">Go to rent ›</button></div>'+
     (due.length===0?'<div class="empty">✓ Everyone has paid up. Nice.</div>':
       '<div class="dueGrid">'+due.map(function(d){
-        var owed=d.monthsOwed>1?'<div class="owedTag">'+d.monthsOwed+' months · '+RM(d.amountOwed)+' owed</div>':'';
+        var owed=(d.monthsOwed>1||d.partial)?'<div class="owedTag">'+(d.monthsOwed>1?d.monthsOwed+' months · ':'partial · ')+RM(d.amountOwed)+' owed</div>':'';
         return '<div class="dueItem'+(d.overdue?' overdue':(d.late?' late':''))+'"><div>'+
           '<div class="duePropLine"><span class="duePropName">'+esc(d.room.propName)+'</span><span class="dueRoomTag">'+esc(d.room.label)+'</span></div>'+
           '<div class="dueName">'+esc(d.tenant.name)+dueBadge(d)+'</div>'+owed+'</div>'+
-        '<div class="dueRight"><span class="dueAmt">'+RM(d.room.rent)+'</span><button class="btn-mini" onclick="openPayment(\''+d.tenant.id+'\')">Record</button></div></div>';
+        '<div class="dueRight"><span class="dueAmt">'+RM(d.amountOwed)+'</span><button class="btn-mini" onclick="openPayment(\''+d.tenant.id+'\')">Record</button></div></div>';
       }).join("")+'</div>')+'</div>';
+
+  var leaseCard='';
+  if(leases.length){
+    leaseCard='<div class="card full-col"><div class="cardHead"><span class="cardTitle">Leases ending soon</span>'+
+      '<button class="link" onclick="go(\'tenants\')">View tenants ›</button></div>'+
+      '<div class="dueGrid">'+leases.map(function(l){
+        var tag = l.expired
+          ? '<span class="overdueBadge">Expired</span>'
+          : (l.days<=14?'<span class="lateBadge">'+l.days+' days</span>':'<span class="leaseSoonTag">'+l.days+' days</span>');
+        var when = l.expired ? ('ended '+longDate(l.end)) : ('ends '+longDate(l.end));
+        return '<div class="dueItem'+(l.expired?' overdue':'')+'"><div>'+
+          '<div class="duePropLine"><span class="duePropName">'+esc(l.room?l.room.propName:"")+'</span><span class="dueRoomTag">'+esc(l.room?l.room.label:"")+'</span></div>'+
+          '<div class="dueName">'+esc(l.tenant.name)+tag+'</div>'+
+          '<div class="dueRoom">Lease '+when+'</div></div>'+
+        '<div class="dueRight"><button class="btn-ghost-mini" onclick="openTenantDetail(\''+l.tenant.id+'\')">Details</button>'+
+          '<button class="btn-mini" onclick="openRenew(\''+l.tenant.id+'\')">Renew</button></div></div>';
+      }).join("")+'</div></div>';
+  }
 
   return '<div class="page">'+
     pageHead("Overview",MONTHS[s.m]+" "+s.y+" · "+DB.Properties.length+" houses · "+all.length+" rooms",
       '<button class="btn-primary" onclick="openNewTenant()">+ New tenant</button>')+
-    ledger+'<div class="dashGrid">'+occCard+collectCard+dueCard+'</div></div>';
+    ledger+'<div class="dashGrid">'+occCard+collectCard+leaseCard+dueCard+'</div></div>';
 }
 
 function ledgerCell(label,value,trend,color,big){
@@ -1027,6 +1103,19 @@ function openTenantDetail(tenantId){
     ? '<div class="tbl" style="margin-top:6px"><div class="thead" style="grid-template-columns:1.1fr .8fr 1fr 1fr auto"><span>Receipt</span><span>Amount</span><span>For</span><span>Paid on</span><span></span></div>'+rows+'</div>'
     : '<div class="empty">No payments recorded yet for this tenant.</div>';
 
+  var depositBlock='';
+  if(t.active===false && (t.depositReturned!=null || t.depositWithheld!=null)){
+    depositBlock='<div class="depositCard"><div class="depHead">Deposit settlement</div>'+
+      '<div class="depRow"><span>Held</span><span>'+RM(t.deposit||0)+'</span></div>'+
+      '<div class="depRow"><span>Returned to tenant</span><span style="color:var(--income)">'+RM(t.depositReturned||0)+'</span></div>'+
+      '<div class="depRow"><span>Withheld</span><span style="color:'+((t.depositWithheld||0)>0?'var(--expense)':'var(--ink-soft)')+'">'+RM(t.depositWithheld||0)+'</span></div>'+
+      (t.depositNote?'<div class="depNote">Reason: '+esc(t.depositNote)+'</div>':'')+
+    '</div>';
+  } else if(t.active!==false){
+    depositBlock='<div class="depositCard"><div class="depRow"><span>Deposit held</span><span>'+RM(t.deposit||0)+'</span></div>'+
+      '<div class="depNote">Refundable on move-out, less any arrears or damage. Normally applied to the final month.</div></div>';
+  }
+
   modal('<div class="tdHead"><div>'+
       '<h3 class="modalTitle">'+esc(t.name)+'</h3>'+
       '<div class="tdSub">'+(room?esc(room.propName)+' · '+esc(room.label):'No room')+' · '+esc(t.phone||"no phone")+'</div></div>'+
@@ -1038,13 +1127,81 @@ function openTenantDetail(tenantId){
       '<div><div class="miniLbl">Payments</div><div class="miniVal">'+pays.length+'</div></div>'+
       '<div><div class="miniLbl">Move-in</div><div class="miniVal" style="font-size:14px">'+esc(t.moveIn||"—")+'</div></div>'+
     '</div>'+
+    depositBlock+
     '<div class="tdActions">'+
       (t.active!==false?'<button class="btn-primary" onclick="closeModal();openPayment(\''+t.id+'\')">+ Record payment</button>':'')+
-      '<button class="btn-ghost" onclick="closeModal();openAgreementFor(\''+t.id+'\')">📄 Agreement</button>'+
+      '<button class="btn-ghost" onclick="closeModal();openStatement(\''+t.id+'\')">📄 Statement of account</button>'+
+      '<button class="btn-ghost" onclick="closeModal();openAgreementFor(\''+t.id+'\')">Agreement</button>'+
       (d&&t.phone?'<button class="btn-remind" onclick="closeModal();openRemind(\''+t.id+'\')">Remind</button>':'')+
     '</div>'+
     '<div class="tdHistTitle">Payment history</div>'+histTable+
     '<button class="btn-ghost full" onclick="closeModal()" style="margin-top:14px">Close</button>');
+}
+
+// Printable per-tenant statement of account (rent due vs paid, running balance)
+function openStatement(tenantId){
+  var t=tenantById(tenantId); if(!t) return;
+  var room=roomById(t.roomId);
+  var c=COMPANY||{};
+  var rent=Number(t.rent)||0;
+  function addMonths(d,n){ var day=d.getDate(); var x=new Date(d.getFullYear(),d.getMonth()+n,1); var dim=new Date(x.getFullYear(),x.getMonth()+1,0).getDate(); x.setDate(Math.min(day,dim)); x.setHours(0,0,0,0); return x; }
+
+  // payments grouped by for-month
+  var paidByKey={};
+  DB.Payments.filter(function(p){return p.tenantId===t.id;}).forEach(function(p){
+    var k=p.forYear+"-"+p.forMonth; paidByKey[k]=(paidByKey[k]||0)+(+p.amount);
+  });
+
+  // walk each month from move-in up to the later of today / last paid month
+  var now=new Date(); now.setHours(0,0,0,0);
+  var mv=t.moveIn?new Date(t.moveIn):now; mv.setHours(0,0,0,0);
+  var lastDue=now;
+  var rows=[], balance=0, totalDue=0, totalPaid=0;
+  var k=0, guard=0;
+  while(guard++<600){
+    var m=addMonths(mv,k);
+    if(m>now && k>0) break;
+    var key=m.getFullYear()+"-"+m.getMonth();
+    var due = rent;                       // each month one rent is due
+    var paid = paidByKey[key]||0;
+    balance += due - paid;
+    totalDue += due; totalPaid += paid;
+    rows.push({label:MONTHS[m.getMonth()]+" "+m.getFullYear(), due:due, paid:paid, bal:balance});
+    k++;
+  }
+
+  var compName=c.companyName||c.landlordName||'';
+  var logo=c.logoUrl?'<img class="docLogo" src="'+esc(c.logoUrl)+'" alt="logo">':'';
+  var compBlock=(logo||compName)?'<div class="docCompany">'+logo+'<div class="docCompanyText">'+
+      (compName?'<div class="docCompanyName">'+esc(compName)+'</div>':'')+
+      (c.landlordAddress?'<div class="docCompanyAddr">'+esc(c.landlordAddress)+'</div>':'')+
+    '</div></div>':'';
+
+  var rowsHtml=rows.map(function(r){
+    var st = r.paid>=r.due ? '<span style="color:#1F6B4F">Paid</span>'
+            : (r.paid>0 ? '<span style="color:#C98A1B">Partial</span>'
+            : '<span style="color:#B14A3A">Unpaid</span>');
+    return '<tr><td>'+r.label+'</td><td class="num">'+RM(r.due)+'</td><td class="num">'+RM(r.paid)+'</td>'+
+      '<td class="num">'+st+'</td><td class="num" style="font-weight:600">'+RM(r.bal)+'</td></tr>';
+  }).join("");
+
+  var balLabel = balance>0 ? "Outstanding balance" : (balance<0 ? "Credit / advance" : "Balance");
+  modal('<div class="docHead"><h3 class="modalTitle">Statement of account</h3>'+
+      '<button class="btn-ghost" onclick="window.print()">⬇ Print / Save PDF</button></div>'+
+    '<div id="printable" class="doc">'+
+      '<div class="docTitleWrap"><div class="docBrand">STATEMENT OF ACCOUNT</div>'+compBlock+
+        '<div class="docDatedLine">As at '+esc(longDate(todayISO()))+'</div></div>'+
+      '<div class="docCols"><div><div class="docLbl">TENANT</div><div class="docVal">'+esc(t.name)+'</div>'+
+        '<div class="docMini">'+esc(t.phone||"")+'</div></div>'+
+        '<div><div class="docLbl">PREMISES</div><div class="docVal">'+esc(room?room.propName+" · "+room.label:"—")+'</div>'+
+        '<div class="docMini">Monthly rent '+RM(rent)+' · since '+esc(longDate(t.moveIn))+'</div></div></div>'+
+      '<table class="plTable" style="margin-top:18px"><tr class="pl-sec"><td>Month</td><td class="num">Rent due</td><td class="num">Paid</td><td class="num">Status</td><td class="num">Balance</td></tr>'+
+        rowsHtml+
+        '<tr style="font-weight:700;border-top:2px solid var(--ink)"><td>Total</td><td class="num">'+RM(totalDue)+'</td><td class="num">'+RM(totalPaid)+'</td><td></td><td class="num" style="color:'+(balance>0?'#B14A3A':'#1F6B4F')+'">'+RM(Math.abs(balance))+'</td></tr>'+
+      '</table>'+
+      '<div class="plDecl"><b>'+balLabel+': '+RM(Math.abs(balance))+'</b><br>This statement reflects rent due (one month\u2019s rent per month from move-in) against payments recorded. The move-in advance and final-month deposit are handled separately per the tenancy agreement.</div>'+
+      '<div class="docDateFoot">Generated '+esc(longDate(todayISO()))+(compName?' · '+esc(compName):'')+'.</div>'+
+    '</div><button class="btn-ghost full" onclick="closeModal()">Close</button>');
 }
 
 // ---------- Rent ----------
@@ -1061,12 +1218,12 @@ function viewRent(){
     '</div>':'';
 
   var dueCards=due.length?'<div class="dueGrid">'+due.map(function(d){
-    var owed=d.monthsOwed>1?'<div class="owedTag">'+d.monthsOwed+' months · '+RM(d.amountOwed)+' owed</div>':'';
+    var owed=(d.monthsOwed>1||d.partial)?'<div class="owedTag">'+(d.monthsOwed>1?d.monthsOwed+' months · ':'partial · ')+RM(d.amountOwed)+' owed</div>':'';
     var remindBtn=d.tenant.phone?'<button class="btn-remind" onclick="openRemind(\''+d.tenant.id+'\')">Remind</button>':'';
     return '<div class="dueItem'+(d.overdue?' overdue':(d.late?' late':''))+'"><div>'+
       '<div class="duePropLine"><span class="duePropName">'+esc(d.room.propName)+'</span><span class="dueRoomTag">'+esc(d.room.label)+'</span></div>'+
       '<div class="dueName">'+esc(d.tenant.name)+dueBadge(d)+'</div>'+owed+'</div>'+
-    '<div class="dueRight"><span class="dueAmt">'+RM(d.room.rent)+'</span>'+remindBtn+'<button class="btn-mini" onclick="openPayment(\''+d.tenant.id+'\')">Record</button></div></div>';
+    '<div class="dueRight"><span class="dueAmt">'+RM(d.amountOwed)+'</span>'+remindBtn+'<button class="btn-mini" onclick="openPayment(\''+d.tenant.id+'\')">Record</button></div></div>';
   }).join("")+'</div>':'';
 
   var visible=DB.Payments.filter(function(p){ if(rentFilter==="all")return true; var r=roomById(p.roomId); return r&&r.propId===rentFilter; });
@@ -1941,14 +2098,21 @@ async function doPayment(tenantId){
   // Guard 1 — amount must be valid and positive
   if(!(amount>0)){ el("pm_amt").style.borderColor="var(--expense)"; el("pm_amt").focus(); return; }
 
-  // Guard 2 — already a payment for this tenant + month + year?
-  var dup=DB.Payments.find(function(p){ return p.tenantId===t.id && p.forMonth===forMonth && p.forYear===forYear; });
-  if(dup){
-    if(!confirm(t.name+" already has a payment recorded for "+MONTHS[forMonth]+" "+forYear+" ("+RM(dup.amount)+", receipt "+dup.receiptNo+").\n\nRecord another payment for the same month anyway?")) return;
+  // Guard 2 — payments already exist for this tenant + month + year?
+  var rent=Number(t.rent)||0;
+  var samMonth=DB.Payments.filter(function(p){ return p.tenantId===t.id && p.forMonth===forMonth && p.forYear===forYear; });
+  if(samMonth.length){
+    var already=samMonth.reduce(function(s,p){return s+(+p.amount);},0);
+    if(rent>0 && already>=rent-0.005){
+      // month already fully covered → likely a true duplicate
+      if(!confirm(t.name+" has already fully paid "+MONTHS[forMonth]+" "+forYear+" ("+RM(already)+" recorded). Record another payment for the same month anyway?")) return;
+    } else {
+      // partial so far → this is a top-up; just inform
+      if(!confirm(t.name+" already paid "+RM(already)+" for "+MONTHS[forMonth]+" "+forYear+" (rent is "+RM(rent)+"). This will be recorded as an additional payment for that month. Continue?")) return;
+    }
   }
 
   // Guard 3 — amount differs from the expected monthly rent?
-  var rent=Number(t.rent)||0;
   if(rent>0 && amount!==rent){
     var diff = amount<rent ? ("This is LESS than the monthly rent of "+RM(rent)+" (a partial payment).")
                            : ("This is MORE than the monthly rent of "+RM(rent)+" (an overpayment or advance).");
@@ -2018,18 +2182,45 @@ function openReceipt(paymentId){
 }
 
 // move out
-async function moveOut(tenantId){
-  var t=tenantById(tenantId);
+function moveOut(tenantId){
+  var t=tenantById(tenantId); if(!t) return;
   var d=dueList().find(function(x){return x.tenant.id===tenantId;});
-  var warn="Move out "+t.name+"? This frees the room and marks the tenancy ended.";
-  if(d){ warn+="\n\nNote: this tenant still owes "+RM(d.amountOwed)+" ("+d.monthsOwed+" month"+(d.monthsOwed>1?"s":"")+"). Settle or record it before moving out if needed."; }
-  if(!confirm(warn)) return;
+  var deposit=Number(t.deposit)||0;
+  var owed=d?d.amountOwed:0;
+  var suggestedReturn=Math.max(0, deposit-owed);
+  modal('<h3 class="modalTitle">Move out — '+esc(t.name)+'</h3>'+
+    '<p class="modalSub">Ends the tenancy, frees the room, and records the deposit settlement.</p>'+
+    (d?'<div class="whNotice" style="color:var(--expense);background:#FBEDE9;border:1px solid #EDC9C0;margin-bottom:14px">This tenant still owes <b>'+RM(owed)+'</b> ('+d.monthsOwed+' month'+(d.monthsOwed>1?'s':'')+'). You may deduct it from the deposit below.</div>':'')+
+    '<div class="tdStats" style="margin-bottom:16px"><div><div class="miniLbl">Deposit held</div><div class="miniVal">'+RM(deposit)+'</div></div>'+
+      '<div><div class="miniLbl">Outstanding rent</div><div class="miniVal" style="color:'+(owed>0?'var(--expense)':'var(--ink)')+'">'+RM(owed)+'</div></div></div>'+
+    '<div class="field" style="margin-bottom:12px"><span class="fieldLbl">Deposit returned to tenant (RM)</span>'+
+      '<input class="inp" id="mo_return" type="number" value="'+suggestedReturn+'" oninput="moReturnSync('+deposit+')"></div>'+
+    '<div class="field" style="margin-bottom:12px"><span class="fieldLbl">Amount withheld (RM)</span>'+
+      '<input class="inp" id="mo_withheld" type="number" value="'+Math.min(owed,deposit)+'" readonly style="background:#F7F4EE"></div>'+
+    '<div class="field" style="margin-bottom:14px"><span class="fieldLbl">Reason for any deduction (optional)</span>'+
+      '<input class="inp" id="mo_note" placeholder="e.g. unpaid rent, cleaning, damage to wall"></div>'+
+    '<button class="btn-primary full" style="background:var(--expense)" onclick="doMoveOut(\''+tenantId+'\','+deposit+')">Confirm move-out</button>');
+}
+function moReturnSync(deposit){
+  var ret=Number(el("mo_return").value)||0;
+  if(ret>deposit){ ret=deposit; el("mo_return").value=deposit; }
+  if(ret<0){ ret=0; el("mo_return").value=0; }
+  el("mo_withheld").value=(deposit-ret).toFixed(2).replace(/\.00$/,"");
+}
+async function doMoveOut(tenantId, deposit){
+  var t=tenantById(tenantId); if(!t) return;
+  var ret=Number(el("mo_return").value)||0;
+  var withheld=Math.max(0, deposit-ret);
+  t.active=false; t.movedOut=todayISO();
+  t.depositReturned=ret;
+  t.depositWithheld=withheld;
+  t.depositNote=el("mo_note").value.trim();
   var room=DB.Rooms.find(function(r){return r.tenantId===tenantId;});
   if(room){ room.tenantId=""; }
-  t.active=false; t.movedOut=todayISO();
-  render();
+  closeModal(); render();
   if(room) await updateRow("Rooms",room);
   await updateRow("Tenants",t);
+  toast("Moved out — "+RM(ret)+" deposit returned");
 }
 
 // expense
