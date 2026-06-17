@@ -244,6 +244,11 @@ h1{font-family:var(--display);font-size:32px;font-weight:600;letter-spacing:-.02
 .tEnd{display:flex;gap:6px;justify-content:flex-end}
 .receiptNo{font-family:var(--display);font-weight:600;color:var(--accent);font-size:13px}
 .subHead{font-family:var(--display);font-size:16px;font-weight:600;margin:26px 0 12px}
+.pastToggle{display:flex;align-items:center;gap:8px;background:none;border:none;cursor:pointer;
+  font-family:var(--display);font-size:16px;font-weight:600;color:var(--ink-soft);margin:26px 0 0;padding:6px 0}
+.pastToggle:hover{color:var(--ink)}
+.pastToggle .chev{display:inline-block;transition:transform .2s;font-size:18px;color:var(--ink-faint)}
+.pastCount{font-family:var(--body);font-size:12px;font-weight:700;background:var(--line);color:var(--ink-soft);padding:1px 9px;border-radius:20px}
 .catTag{font-size:11.5px;background:#F2EDE3;color:var(--ink-soft);padding:3px 9px;border-radius:7px;font-weight:600}
 .green{color:var(--income);font-weight:600}
 .red{color:var(--expense);font-weight:600}
@@ -559,7 +564,7 @@ function el(id){return document.getElementById(id);}
 var DB={Properties:[],Rooms:[],Tenants:[],Payments:[],Expenses:[]};
 var COMPANY={};
 var TAB="dashboard";
-var openProp=null, propInit=false, propQuery="", editRoomId=null, tenantQuery="", rentFilter="all", reportYear=new Date().getFullYear();
+var openProp=null, propInit=false, propQuery="", editRoomId=null, tenantQuery="", rentFilter="all", reportYear=new Date().getFullYear(), pastOpen=false;
 var syncState="ok";
 
 // Reflects the save queue: all saved / N pending / failed (with retry).
@@ -1060,11 +1065,17 @@ function viewTenants(){
       '<div class="tEnd">'+remind+'<button class="btn-mini" onclick="openPayment(\''+t.id+'\')">Receipt</button>'+
       '<button class="btn-ghost-mini" onclick="moveOut(\''+t.id+'\')">Move out</button></div></div>';
   }).join("");
-  var pastHtml=filt(past).length?'<div class="subHead">Past tenants</div><div class="tbl">'+
-    filt(past).map(function(t){return '<div class="trow" style="grid-template-columns:'+cols+';opacity:.6">'+
+  var pastList=filt(past);
+  var pastRows=pastList.map(function(t){return '<div class="trow" style="grid-template-columns:'+cols+';opacity:.7">'+
       '<div><button class="tNameBtn" onclick="openTenantDetail(\''+t.id+'\')">'+esc(t.name)+'</button><div class="tPhone">'+esc(t.phone)+'</div></div>'+
       '<span class="tCell">—</span><span class="tCell">'+RM(t.rent)+'</span><span class="tCell">'+esc(t.moveIn)+'</span>'+
-      '<span class="tCell">Moved out '+esc(t.movedOut)+'</span><span></span></div>';}).join("")+'</div>':'';
+      '<span class="tCell">Moved out '+esc(t.movedOut)+'</span><span></span></div>';}).join("");
+  var pastHtml=pastList.length?
+    '<button class="pastToggle" onclick="pastOpen=!pastOpen;render()">'+
+      '<span class="chev" style="transform:'+(pastOpen?'rotate(90deg)':'none')+'">›</span>'+
+      'Past tenants <span class="pastCount">'+pastList.length+'</span></button>'+
+    (pastOpen?'<div class="tbl" style="margin-top:10px">'+pastRows+'</div>':'')
+    :'';
   return '<div class="page">'+
     pageHead("Tenants",active.length+" active · "+past.length+" past",
       '<button class="btn-primary" onclick="openNewTenant()">+ New tenant</button>')+
