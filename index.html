@@ -350,28 +350,87 @@ async function apiGet(){
   if(!j.ok) throw new Error(j.error||"load failed");
   return j.data;
 }
-async function apiPost(payload){
-  setSync("saving");
-  try{
-    // text/plain avoids a CORS preflight against Apps Script
-    var r = await fetch(apiUrl(), {
-      method:"POST",
-      headers:{"Content-Type":"text/plain;charset=utf-8"},
-      body:JSON.stringify(payload)
-    });
-    var j = await r.json();
-    if(!j.ok) throw new Error(j.error||"save failed");
-    setSync("ok");
-    return j.result;
-  }catch(e){ setSync("err"); throw e; }
+
+// Low-level POST. Returns the parsed result or throws.
+async function apiPostRaw(payload){
+  var r = await fetch(apiUrl(), {
+    method:"POST",
+    headers:{"Content-Type":"text/plain;charset=utf-8"},
+    body:JSON.stringify(payload)
+  });
+  var j = await r.json();
+  if(!j.ok) throw new Error(j.error||"save failed");
+  return j.result;
 }
-var insertRow  = function(table,row){ return apiPost({action:"insert",table:table,row:row}); };
-var updateRow  = function(table,row){ return apiPost({action:"update",table:table,row:row}); };
-var deleteRow  = function(table,id){  return apiPost({action:"delete",table:table,id:id}); };
-var replaceAll = function(table,rows){return apiPost({action:"replaceAll",table:table,rows:rows}); };
-var saveReceipt = function(payment){ return apiPost({action:"saveReceipt",payment:payment}); };
-var saveCompanyApi = function(company){ return apiPost({action:"saveCompany",company:company}); };
-var houseAgreementApi = function(data){ return apiPost({action:"houseAgreement",data:data}); };
+
+// ---- Save queue --------------------------------------------------------
+// Data mutations (insert/update/delete/replaceAll) are queued so a failed
+// write (flaky connection) is retried automatically and survives a reload.
+var saveQueue=[];        // [{id, payload, tries}]
+var queueRunning=false;
+var QKEY="rumah_queue";
+
+function loadQueue(){
+  try{ var s=localStorage.getItem(QKEY); saveQueue = s?JSON.parse(s):[]; }
+  catch(e){ saveQueue=[]; }
+}
+function persistQueue(){
+  try{ localStorage.setItem(QKEY, JSON.stringify(saveQueue)); }catch(e){}
+}
+function enqueue(payload){
+  saveQueue.push({id:uid(), payload:payload, tries:0});
+  persistQueue();
+  updateSyncUI();
+  runQueue();
+}
+// queued mutation wrappers (fire-and-forget; UI already updated optimistically)
+function qInsert(table,row){ enqueue({action:"insert",table:table,row:row}); }
+function qUpdate(table,row){ enqueue({action:"update",table:table,row:row}); }
+function qDelete(table,id){  enqueue({action:"delete",table:table,id:id}); }
+function qReplaceAll(table,rows){ enqueue({action:"replaceAll",table:table,rows:rows}); }
+
+async function runQueue(){
+  if(queueRunning) return;
+  if(!saveQueue.length){ updateSyncUI(); return; }
+  queueRunning=true; updateSyncUI();
+  while(saveQueue.length){
+    var item=saveQueue[0];
+    try{
+      await apiPostRaw(item.payload);
+      saveQueue.shift();          // success → remove
+      persistQueue();
+      updateSyncUI();
+    }catch(e){
+      item.tries=(item.tries||0)+1;
+      persistQueue();
+      queueRunning=false;
+      updateSyncUI();
+      // back off, then retry the same item (network likely down)
+      var delay=Math.min(30000, 2000*item.tries);
+      setTimeout(runQueue, delay);
+      return;
+    }
+  }
+  queueRunning=false;
+  updateSyncUI();
+}
+function retryQueueNow(){ // manual retry from the UI
+  saveQueue.forEach(function(it){ it.tries=0; });
+  persistQueue();
+  runQueue();
+}
+
+// Keep the legacy names working: mutations now go through the queue.
+// (saveReceipt / saveCompany / houseAgreement stay direct — they return data
+//  the UI needs right away.)
+var insertRow  = function(table,row){ qInsert(table,row); return Promise.resolve(); };
+var updateRow  = function(table,row){ qUpdate(table,row); return Promise.resolve(); };
+var deleteRow  = function(table,id){  qDelete(table,id);  return Promise.resolve(); };
+var replaceAll = function(table,rows){qReplaceAll(table,rows); return Promise.resolve(); };
+var saveReceipt = function(payment){ return apiPostRaw({action:"saveReceipt",payment:payment}); };
+var saveCompanyApi = function(company){ return apiPostRaw({action:"saveCompany",company:company}); };
+var houseAgreementApi = function(data){ return apiPostRaw({action:"houseAgreement",data:data}); };
+var restoreAllApi = function(data){ return apiPostRaw({action:"restoreAll",data:data}); };
 
 // ---------- helpers ----------
 var MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -404,7 +463,22 @@ var TAB="dashboard";
 var openProp=null, propInit=false, propQuery="", editRoomId=null, tenantQuery="", rentFilter="all", reportYear=new Date().getFullYear();
 var syncState="ok";
 
-function setSync(s){ syncState=s; var d=el("syncDot"); if(d){ d.className="syncDot "+(s==="ok"?"":s); d.querySelector("span").textContent = s==="saving"?"Saving…":s==="err"?"Sync error":"All saved"; } }
+// Reflects the save queue: all saved / N pending / failed (with retry).
+function updateSyncUI(){
+  var d=el("syncDot"); if(!d) return;
+  var n=saveQueue.length;
+  var failed=saveQueue.some(function(it){return (it.tries||0)>=1;}) && !queueRunning;
+  var cls, txt;
+  if(n===0){ cls=""; txt="All saved"; }
+  else if(failed){ cls="err"; txt=n+" unsaved · tap to retry"; }
+  else { cls="saving"; txt="Saving "+n+"…"; }
+  d.className="syncDot "+cls;
+  var span=d.querySelector("span"); if(span) span.textContent=txt;
+  d.onclick = (n>0 && failed) ? retryQueueNow : null;
+  d.style.cursor = (n>0 && failed) ? "pointer" : "default";
+}
+// kept for any old callers
+function setSync(s){ updateSyncUI(); }
 
 // derived
 function rooms(){ return DB.Rooms.map(function(r){ var p=DB.Properties.find(function(x){return x.id===r.propId;}); return Object.assign({},r,{propName:p?p.name:"?"}); }); }
@@ -420,6 +494,7 @@ function roomIsWholeHouse(roomId){ var r=DB.Rooms.find(function(x){return x.id==
 //  BOOT
 // ============================================================
 async function boot(){
+  loadQueue();              // restore any pending writes from a previous session
   if(!apiUrl()){ renderConnect(); return; }
   renderLoading();
   try{
@@ -427,9 +502,24 @@ async function boot(){
     ["Properties","Rooms","Tenants","Payments","Expenses"].forEach(function(k){ if(!DB[k]) DB[k]=[]; });
     COMPANY = DB.CompanyObj || {};
     render();
+    runQueue();             // flush anything that was pending before
+    maybeRemindBackup();
   }catch(e){
     renderConnect("Couldn't reach that URL. Check it ends with /exec and the deployment allows 'Anyone'. ("+e.message+")");
   }
+}
+// gentle weekly nudge if backups are enabled and it's been 7+ days
+function maybeRemindBackup(){
+  if(!backupRemindOn()) return;
+  var last=localStorage.getItem("rumah_last_backup");
+  var due = !last || (Date.now()-new Date(last).getTime() > 7*86400000);
+  if(!due) return;
+  setTimeout(function(){
+    modal('<h3 class="modalTitle">Time for a backup</h3>'+
+      '<p class="modalSub">'+(last?'It\u2019s been over a week since your last backup.':'You haven\u2019t backed up yet.')+' A quick download keeps your records safe.</p>'+
+      '<div style="display:flex;gap:10px"><button class="btn-primary" style="flex:1" onclick="downloadBackup();closeModal()">⬇ Download backup now</button>'+
+      '<button class="btn-ghost" onclick="closeModal()">Later</button></div>');
+  }, 1200);
 }
 
 function renderLoading(){
@@ -505,10 +595,11 @@ function render(){
         '<div class="sideStat"><span class="sideStatNum">'+occ+'</span><span class="sideStatLbl">occupied</span></div>'+
         '<div class="sideStat"><span class="sideStatNum vac">'+vac+'</span><span class="sideStatLbl">vacant</span></div>'+
       '</div>'+
-      '<div class="syncDot '+(syncState==="ok"?"":syncState)+'" id="syncDot"><i></i><span>'+(syncState==="saving"?"Saving…":syncState==="err"?"Sync error":"All saved")+'</span></div>'+
+      '<div class="syncDot" id="syncDot"><i></i><span>All saved</span></div>'+
     '</aside>'+
     '<main class="main">'+body+'</main>'+
   '</div>';
+  updateSyncUI();
 }
 
 function icon(k){
@@ -1220,7 +1311,81 @@ function viewSettings(){
       '<div class="connUrl">'+esc(localStorage.getItem("rumah_api")||"(not set)")+'</div>'+
       '<button class="btn-ghost" style="margin-top:12px" onclick="changeConnection()">Change connection URL</button>'+
     '</div>'+
+    '<div class="card" style="max-width:720px;margin-top:18px">'+
+      '<div class="cardTitle" style="margin-bottom:10px">Data &amp; backup</div>'+
+      '<p class="hint" style="margin-bottom:12px">Download a full backup of everything (houses, rooms, tenants, payments, expenses, settings) as a file you can keep safe. '+lastBackupNote()+'</p>'+
+      '<div style="display:flex;gap:10px;flex-wrap:wrap">'+
+        '<button class="btn-primary" onclick="downloadBackup()">⬇ Download backup</button>'+
+        '<button class="btn-ghost" onclick="openRestore()">⬆ Restore from backup</button>'+
+      '</div>'+
+      '<label class="reminderToggle" style="margin-top:14px"><input type="checkbox" '+(backupRemindOn()?'checked':'')+' onchange="toggleBackupRemind(this.checked)"> Remind me weekly to back up</label>'+
+    '</div>'+
   '</div>';
+}
+function lastBackupNote(){
+  var t=localStorage.getItem("rumah_last_backup");
+  if(!t) return "You haven\u2019t made a backup yet.";
+  return "Last backup: "+longDate(t.slice(0,10))+".";
+}
+function backupRemindOn(){ return localStorage.getItem("rumah_backup_remind")==="on"; }
+function toggleBackupRemind(on){ localStorage.setItem("rumah_backup_remind", on?"on":"off"); }
+
+// Download everything as a single JSON backup file
+function downloadBackup(){
+  var data={
+    _app:"Rumah", _version:1, _exported:new Date().toISOString(),
+    Properties:DB.Properties, Rooms:DB.Rooms, Tenants:DB.Tenants,
+    Payments:DB.Payments, Expenses:DB.Expenses, Company:COMPANY
+  };
+  var stamp=todayISO();
+  var a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));
+  a.download="rumah-backup-"+stamp+".json"; a.click();
+  localStorage.setItem("rumah_last_backup", new Date().toISOString());
+  if(TAB==="settings") render();
+}
+
+function openRestore(){
+  modal('<h3 class="modalTitle">Restore from backup</h3>'+
+    '<div class="whNotice" style="color:var(--expense);background:#FBEDE9;border:1px solid #EDC9C0;margin-bottom:14px">'+
+      '<b>Warning:</b> Restoring replaces ALL current data in your sheet with the contents of the backup file. '+
+      'This cannot be undone. Download a fresh backup of your current data first if unsure.</div>'+
+    '<div class="field" style="margin-bottom:14px"><span class="fieldLbl">Choose a backup file (.json)</span>'+
+      '<input class="inp" type="file" id="rs_file" accept="application/json,.json"></div>'+
+    '<div id="rs_status"></div>'+
+    '<button class="btn-primary full" onclick="doRestore()">Review backup before restoring</button>');
+}
+function doRestore(){
+  var f=el("rs_file"); if(!f||!f.files||!f.files[0]){ el("rs_status").innerHTML='<div class="hint" style="color:var(--expense)">Please choose a file first.</div>'; return; }
+  var reader=new FileReader();
+  reader.onload=function(){
+    var data;
+    try{ data=JSON.parse(reader.result); }
+    catch(e){ el("rs_status").innerHTML='<div class="hint" style="color:var(--expense)">That file isn\u2019t valid JSON.</div>'; return; }
+    if(!data || !data.Properties || !data.Rooms){ el("rs_status").innerHTML='<div class="hint" style="color:var(--expense)">This doesn\u2019t look like a Rumah backup file.</div>'; return; }
+    var counts=(data.Properties.length||0)+' houses · '+(data.Rooms.length||0)+' rooms · '+(data.Tenants?data.Tenants.length:0)+' tenants · '+(data.Payments?data.Payments.length:0)+' payments · '+(data.Expenses?data.Expenses.length:0)+' expenses';
+    el("rs_status").innerHTML='<div class="whNotice" style="margin-bottom:12px">Backup contains:<br><b>'+counts+'</b>'+(data._exported?'<br>Exported '+esc(longDate(String(data._exported).slice(0,10))):'')+'</div>'+
+      '<button class="btn-primary full" style="background:var(--expense)" onclick=\'confirmRestore('+JSON.stringify(JSON.stringify(data))+')\'>Yes, replace everything with this backup</button>';
+  };
+  reader.readAsText(f.files[0]);
+}
+async function confirmRestore(jsonStr){
+  var data=JSON.parse(jsonStr);
+  el("rs_status").innerHTML='<div class="haStatus"><div class="spinner" style="width:20px;height:20px"></div><span>Restoring… do not close this window.</span></div>';
+  var payload={
+    Properties:data.Properties||[], Rooms:data.Rooms||[], Tenants:data.Tenants||[],
+    Payments:data.Payments||[], Expenses:data.Expenses||[], Company:data.Company||{}
+  };
+  try{
+    await restoreAllApi(payload);
+    // refresh local state from what we just wrote
+    DB.Properties=payload.Properties; DB.Rooms=payload.Rooms; DB.Tenants=payload.Tenants;
+    DB.Payments=payload.Payments; DB.Expenses=payload.Expenses; COMPANY=payload.Company;
+    closeModal(); propInit=false; render();
+    alert("Restore complete. Your data now matches the backup.");
+  }catch(e){
+    el("rs_status").innerHTML='<div class="hint" style="color:var(--expense)">Restore failed: '+esc(e.message)+'. Your sheet may be partially updated — check it, or try again.</div>';
+  }
 }
 function setField(label,id,val){
   return '<div class="field"><span class="fieldLbl">'+label+'</span><input class="inp" id="'+id+'" value="'+esc(val||"")+'"></div>';
@@ -1703,6 +1868,10 @@ async function delExpense(id){
   await deleteRow("Expenses",id);
 }
 
+// warn before leaving if writes are still pending
+window.addEventListener("beforeunload", function(e){
+  if(saveQueue.length>0){ e.preventDefault(); e.returnValue=""; return ""; }
+});
 // start
 boot();
 </script>
