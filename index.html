@@ -138,6 +138,7 @@ h1{font-family:var(--display);font-size:32px;font-weight:600;letter-spacing:-.02
 .invRow{display:flex;gap:8px;align-items:center;margin-bottom:6px}
 .invRow .invNo{font-size:12px;color:var(--ink-faint);width:18px;text-align:center;flex-shrink:0}
 .haStatus{display:flex;align-items:center;gap:10px;padding:16px;background:#FBF9F4;border:1px solid var(--line);border-radius:11px;margin-bottom:14px;font-size:13px;color:var(--ink-soft)}
+.connUrl{font-family:monospace;font-size:12px;color:var(--ink-soft);background:#FBF9F4;border:1px solid var(--line);border-radius:8px;padding:10px 12px;word-break:break-all}
 .driveMsg{color:var(--ink-faint)}
 .driveMsg.err{color:var(--expense)}
 .toggleRow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-top:1px solid var(--line);margin-top:6px}
@@ -366,8 +367,9 @@ function renderLoading(){
   el("app").innerHTML='<div class="loadWrap"><div class="spinner"></div><span style="color:var(--ink-soft)">Loading your ledger…</span></div>';
 }
 
-function renderConnect(errMsg){
-  var saved = localStorage.getItem("rumah_api")||"";
+function renderConnect(errMsg, prefill){
+  var saved = (prefill!=null?prefill:(localStorage.getItem("rumah_api")||""));
+  var hasData = DB.Properties && DB.Properties.length>0;
   el("app").innerHTML =
   '<div class="connectWrap"><div class="connectCard">'+
     '<div class="connectMark">R</div>'+
@@ -376,6 +378,7 @@ function renderConnect(errMsg){
     (errMsg?'<div class="dueBanner">'+esc(errMsg)+'</div>':'')+
     '<input class="inp" id="apiInput" placeholder="https://script.google.com/macros/s/…/exec" value="'+esc(saved)+'" style="margin-bottom:14px">'+
     '<button class="btn-primary full" onclick="saveApi()">Connect</button>'+
+    (hasData?'<button class="btn-ghost full" onclick="render()">Cancel</button>':'')+
     '<p class="pageSub" style="margin-top:16px;font-size:12px">First time? Open the setup guide included with these files.</p>'+
   '</div></div>';
 }
@@ -383,8 +386,14 @@ function saveApi(){
   var v=el("apiInput").value.trim();
   if(!v) return;
   localStorage.setItem("rumah_api",v);
-  API_URL=v;
+  API_URL=v;          // override any in-memory value so the new URL always wins
   boot();
+}
+// Re-show the connect screen so the backend URL can be changed anytime
+function changeConnection(){
+  var cur=localStorage.getItem("rumah_api")||"";
+  API_URL="";         // clear in-memory so the new entry takes effect
+  renderConnect("", cur);
 }
 
 // ============================================================
@@ -957,6 +966,12 @@ function viewSettings(){
       '<div class="cardTitle" style="margin-bottom:10px">Agreements</div>'+
       '<p class="hint" style="margin-bottom:6px">Room rentals use the simple built-in agreement. Houses marked <b>“whole-house rental”</b> (toggle on the Houses page) use your uploaded Word template, auto-filled with the tenant\'s details and inventory, saved as a Google Doc in your Drive\'s <b>Rumah Agreements</b> folder.</p>'+
       '<p class="hint">First-time setup for the house template is in the setup guide (upload the template, run <b>setupHouseTemplate</b> once).</p>'+
+    '</div>'+
+    '<div class="card" style="max-width:720px;margin-top:18px">'+
+      '<div class="cardTitle" style="margin-bottom:10px">Connection</div>'+
+      '<p class="hint" style="margin-bottom:10px">The backend (Apps Script) URL this device talks to. Change it if you redeployed or set up a new sheet.</p>'+
+      '<div class="connUrl">'+esc(localStorage.getItem("rumah_api")||"(not set)")+'</div>'+
+      '<button class="btn-ghost" style="margin-top:12px" onclick="changeConnection()">Change connection URL</button>'+
     '</div>'+
   '</div>';
 }
